@@ -1,0 +1,7 @@
+[package]
+name = "gcal-tui"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+google-calendar = "0.10.0"
