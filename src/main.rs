@@ -73,36 +73,31 @@ async fn main() {
 
     println!("Fetching events from {} to {}...\n", time_min, time_max);
 
-    let (_, calendar_list) = hub
-        .calendar_list()
-        .list()
-        .doit()
-        .await
-        .expect("Failed to fetch calendar list");
+    // let (_, calendar_list) = hub
+    //     .calendar_list()
+    //     .list()
+    //     .doit()
+    //     .await
+    //     .expect("Failed to fetch calendar list");
+    //
+    // let calendars = calendar_list.items.unwrap_or_default();
+    // if calendars.is_empty() {
+    //     println!("No Calendars found");
+    // }
 
-    let calendars = calendar_list.items.unwrap_or_default();
-    if calendars.is_empty() {
-        println!("No Calendars found");
-    }
+    let calendar_ids = [
+        "jobinnelson369@gmail.com",
+        "3nvob228pjf3tqguev5a42vqus@group.calendar.google.com",
+        "a1gib8smdet8ljbkfe1ohhmsr0@group.calendar.google.com",
+        "fk5ttnq95q2oabjfjdirm2pcho@group.calendar.google.com",
+    ];
 
-    for calendar in calendars {
-        let cal_id = match calendar.id {
-            Some(id) => id,
-            None => continue,
-        };
-        dbg!(&cal_id);
-
-        let cal_name = calendar
-            .summary
-            .unwrap_or_else(|| "Untitled Calendar".to_string());
-
-        println!("Calendar: {}", cal_name);
-        println!("------------------");
-
+    for cal_id in calendar_ids {
+        println!("{}", cal_id);
         // 5. Query the Calendar API
         let (_, event_list) = hub
             .events()
-            .list(&cal_id)
+            .list(cal_id)
             .time_min(start_of_week.to_utc())
             .time_max(end_of_week.to_utc())
             .single_events(true) // Crucial: expands recurring events into individual instances
@@ -115,7 +110,7 @@ async fn main() {
         let events = event_list.items.unwrap_or_default();
         if events.is_empty() {
             println!("No events found for this week.");
-            return;
+            continue;
         }
 
         for event in events {
