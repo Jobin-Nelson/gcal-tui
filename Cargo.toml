@@ -5,7 +5,10 @@ edition = "2024"
 
 [dependencies]
 chrono = "0.4.44"
+config = "0.15.23"
+derive_more = { version = "2.1.1", features = ["from"] }
 dotenvy = "0.15.7"
+futures = "0.3.32"
 google-calendar3 = "7.0.0"
 serde = "1.0.228"
 serde_json = "1.0.150"
