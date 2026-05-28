@@ -1,12 +1,16 @@
-use crate::{Calendar, Config, Result};
+use crate::{App, Config, Result};
 
 pub async fn run() -> Result<()> {
-    let config = Config::new()?;
-    dbg!(&config);
+    // let config = Config::new()?;
 
-    let cal = Calendar::new(config.calendar_ids).await?;
+    let terminal = ratatui::init();
 
-    let events = cal.get_events().await?;
+    let result = App::new().run(terminal).await;
+    ratatui::restore();
 
-    Ok(())
+    // let cal = Calendar::new(config.calendar_ids).await?;
+    //
+    // let events = cal.get_events().await?;
+
+    result
 }

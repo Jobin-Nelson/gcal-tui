@@ -8,6 +8,7 @@ pub enum Error {
     Io(std::io::Error),
     Config(ConfigError),
     Cal(google_calendar3::Error),
+    Term,
 }
 
 // region:    --- Error Boilerplate
