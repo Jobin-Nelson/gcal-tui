@@ -12,6 +12,8 @@ use ratatui::{
 pub struct App {
     pub running: bool,
     pub counter: u8,
+    pub scroll_offset: i8,
+    pub viewport_hours: i8,
     pub events: EventHandler,
 }
 
@@ -20,6 +22,8 @@ impl Default for App {
         Self {
             running: true,
             counter: 0,
+            scroll_offset: 7,
+            viewport_hours: 6,
             events: EventHandler::new(),
         }
     }
