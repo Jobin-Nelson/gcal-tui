@@ -41,6 +41,7 @@ impl App {
                     CrosstermEvent::Key(key_event) if key_event.kind == KeyEventKind::Press => {
                         self.handle_key_events(key_event)?
                     }
+                    CrosstermEvent::Resize(_, _) => terminal.autoresize()?,
                     _ => {}
                 },
                 Event::App(app_event) => match app_event {
