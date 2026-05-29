@@ -1,34 +1,153 @@
-use chrono::{DateTime, Datelike, Local, NaiveTime, Timelike, Utc, Weekday};
+use std::cmp::Reverse;
+
+use chrono::{DateTime, Datelike, Local, TimeDelta, TimeZone, Utc};
 use ratatui::{
     buffer::Buffer,
     layout::{Alignment, Constraint, Layout, Margin, Rect, Spacing},
+    style::{Color, Modifier, Style},
     symbols::merge::MergeStrategy,
     text::Line,
-    widgets::{Block, BorderType, Paragraph, Widget},
+    widgets::{Block, BorderType, Borders, Paragraph, Widget, Wrap},
 };
-use tracing::Level;
 
 use crate::{
-    app::App,
-    constants::{MTW, RESOLUTION_IN_MINS, ROWS_PER_HOUR},
-    trace_dbg,
+    app::{App, EventNode},
+    constants::{MTWTFSS, RESOLUTION_IN_MINS, ROWS_PER_HOUR},
 };
 
+struct RenderedEvent<'a> {
+    pub event: &'a EventNode,
+    pub rect: Rect,
+}
+
+struct VisibleEvents<'a> {
+    pub event: &'a EventNode,
+    pub start_row: u16,
+    pub end_row: u16,
+}
+
+fn calculate_viewport_rect<'a, 'b>(
+    events: &'a [EventNode],
+    viewport_start: DateTime<Utc>,
+    viewport_end: DateTime<Utc>,
+    column_area: &'b Rect,
+) -> Vec<RenderedEvent<'a>> {
+    // 1. Filter and convert time directly to grid rows
+    let mut visible_events: Vec<VisibleEvents<'a>> = events
+        .iter()
+        .filter_map(|ev| {
+            if ev.end_time <= viewport_start || ev.start_time >= viewport_end {
+                return None;
+            }
+
+            // TODO: Is clamped time really needed?
+            let clamped_start = ev.start_time.max(viewport_start);
+            let clamped_end = ev.end_time.max(viewport_end);
+
+            // Calculate total minutes from top of the screen
+            let start_mins = (clamped_start - viewport_start).num_minutes();
+            let end_mins = (clamped_end - viewport_end).num_minutes();
+
+            // Convert minutes to terminal rows
+            let start_row = start_mins as u16 / RESOLUTION_IN_MINS;
+            let mut end_row = end_mins as u16 / RESOLUTION_IN_MINS;
+
+            // INFO: Ensure even short events (eg. 5 mins) take up at least 1 row
+            if end_row <= start_row {
+                end_row = start_row + 1;
+            }
+
+            Some(VisibleEvents {
+                event: ev,
+                start_row,
+                end_row,
+            })
+        })
+        .collect();
+
+    if visible_events.is_empty() {
+        return vec![];
+    }
+
+    // 2. Sort and Cluster (Using Row Indices)
+    visible_events.sort_by_key(|e| (e.start_row, Reverse(e.end_row)));
+
+    let mut clusters: Vec<Vec<usize>> = Vec::new();
+    let mut current_cluster: Vec<usize> = Vec::new();
+    let mut cluster_end_row = 0;
+
+    for (i, ev) in visible_events.iter().enumerate() {
+        if ev.start_row >= cluster_end_row && !current_cluster.is_empty() {
+            clusters.push(std::mem::take(&mut current_cluster));
+            cluster_end_row = ev.end_row;
+        } else {
+            cluster_end_row = cluster_end_row.max(ev.end_row);
+        }
+        current_cluster.push(i);
+    }
+
+    if !current_cluster.is_empty() {
+        clusters.push(current_cluster);
+    }
+
+    // 3. Generate Rects and find the Column index
+    let mut results = Vec::with_capacity(visible_events.len());
+
+    for cluster in clusters {
+        let mut column_ends: Vec<u16> = Vec::new();
+        let mut placmeents = Vec::new();
+
+        for &idx in &cluster {
+            let ev = &visible_events[idx];
+            let mut placed_col = None;
+
+            for (c_idx, c_end) in column_ends.iter_mut().enumerate() {
+                if *c_end <= ev.start_row {
+                    *c_end = ev.end_row;
+                    placed_col = Some(c_idx);
+                    break;
+                }
+            }
+
+            let col_idx = placed_col.unwrap_or_else(|| {
+                column_ends.push(ev.end_row);
+                column_ends.len() - 1
+            });
+            placmeents.push((idx, col_idx));
+        }
+
+        let total_cols = column_ends.len() as u16;
+        let col_width = (column_area.width / total_cols).max(1);
+
+        for (idx, col_idx) in placmeents {
+            let ev = &visible_events[idx];
+
+            let rect = Rect {
+                x: column_area.x + (col_idx as u16 * col_width),
+                y: column_area.y + ev.start_row,
+                width: col_width,
+                height: ev.end_row - ev.start_row,
+            };
+
+            results.push(RenderedEvent {
+                event: ev.event,
+                rect,
+            });
+        }
+    }
+
+    results
+}
+
 impl Widget for &App {
-    /// Renders the user interface widgets.
-    ///
-    // This is where you add new widgets.
-    // See the following resources:
-    // - https://docs.rs/ratatui/latest/ratatui/widgets/index.html
-    // - https://github.com/ratatui/ratatui/tree/master/examples
     fn render(self, area: Rect, buf: &mut Buffer) {
         let header_layout = Layout::vertical([Constraint::Length(3), Constraint::Fill(1)])
             .spacing(Spacing::Overlap(1));
         let horizontal_layout = Layout::horizontal([
             Constraint::Length(9),
-            Constraint::Fill(1),
-            Constraint::Fill(1),
-            Constraint::Fill(1),
+            Constraint::Fill(1), // Yesterday
+            Constraint::Fill(1), // Today
+            Constraint::Fill(1), // Tommorrow
         ])
         .spacing(Spacing::Overlap(1));
         let [header, calendar] = area.layout(&header_layout);
@@ -36,13 +155,13 @@ impl Widget for &App {
         let columns: [Rect; 4] = calendar.layout(&horizontal_layout);
 
         let block = Block::bordered().merge_borders(MergeStrategy::Exact);
-        let event_block = Block::bordered().border_type(BorderType::Rounded);
 
         // headers
-        let current_day = Local::now().weekday();
+        let current_datetime = Local::now();
+        let current_day = current_datetime.weekday();
         let day_headers = [current_day.pred(), current_day, current_day.succ()];
         std::iter::once("Time")
-            .chain(day_headers.map(|d| MTW[d.num_days_from_monday() as usize]))
+            .chain(day_headers.map(|d| MTWTFSS[d.num_days_from_monday() as usize]))
             .zip(header_columns.iter())
             .for_each(|(header, &header_column)| {
                 Paragraph::new(header)
@@ -52,106 +171,103 @@ impl Widget for &App {
             });
 
         // Time
-        let viewport_start_time = self.scroll_offset;
-        let viewport_end_time = self.scroll_offset + self.viewport_hours;
-        let mut lines = vec![];
+        let start_hour = self.scroll_offset as u32;
+        let end_hour = (self.scroll_offset + self.viewport_hours) as u32;
 
-        let num_fillers_each_half_hour = ROWS_PER_HOUR / 2;
-
-        for hour in viewport_start_time..=viewport_end_time {
-            lines.push(Line::from(format!("{:02}:00", hour)));
-            if hour == viewport_end_time {
-                continue;
+        let mut time_lines = Vec::new();
+        for hour in start_hour..end_hour {
+            for row_within_hour in 0..ROWS_PER_HOUR {
+                match row_within_hour {
+                    0 => {
+                        // Top of the hour (eg. 09:00)
+                        time_lines.push(
+                            Line::from(format!("{:02}:00", hour))
+                                .style(Style::default().fg(Color::Gray)),
+                        );
+                    }
+                    2 => {
+                        // Half-hour mark (30 mins)
+                        time_lines.push(
+                            Line::from(format!("{:02}:30", hour))
+                                .style(Style::default().fg(Color::Gray)),
+                        );
+                    }
+                    _ => {
+                        // 15, 45 minutes mark
+                        time_lines.push(Line::from(""));
+                    }
+                }
             }
-            lines.extend(std::iter::repeat_n(
-                Line::from(""),
-                num_fillers_each_half_hour as usize,
-            ));
-            lines.push(Line::from(format!("{:02}:30", hour)));
-            lines.extend(std::iter::repeat_n(
-                Line::from(""),
-                num_fillers_each_half_hour as usize,
-            ));
         }
-        Paragraph::new(lines)
+
+        Paragraph::new(time_lines)
             .alignment(Alignment::Center)
             .block(block.clone())
             .render(columns[0], buf);
 
         // Calendar
-        let is_this_day = |d: &DateTime<Utc>, day: Weekday| d.weekday() == day;
-        let is_within_viewport = |d: &DateTime<Utc>| {
-            let start_time = NaiveTime::from_hms_opt(viewport_start_time as u32, 0, 0).unwrap();
-            let end_time = NaiveTime::from_hms_opt(viewport_end_time as u32, 0, 0).unwrap();
-            let current_time = d.time();
-            current_time >= start_time && current_time <= end_time
-        };
+        let today_local = Local::now().date_naive();
+        let target_dates = [
+            today_local - TimeDelta::days(1), // Yesterday
+            today_local,                      // Today
+            today_local + TimeDelta::days(1), // Tommorrow
+        ];
 
-        for (&day_area, day) in columns.iter().skip(1).zip(day_headers) {
-            block.clone().render(day_area, buf);
+        for (day, day_area) in target_dates.iter().zip(columns.iter().skip(1)) {
+            block.clone().render(*day_area, buf);
 
-            let cal_events_per_day_in_view = self.cal_events.iter().filter(|e| {
-                let start_end_datetime = e.start.as_ref().zip(e.end.as_ref());
-                start_end_datetime.is_some_and(|(s, e)| {
-                    s.date_time
-                        .as_ref()
-                        .is_some_and(|d| is_this_day(d, day) && is_within_viewport(d))
-                        && e.date_time
-                            .as_ref()
-                            .is_some_and(|d| is_this_day(d, day) && is_within_viewport(d))
-                })
+            let inner_area = day_area.inner(Margin {
+                horizontal: 1,
+                vertical: 1,
             });
 
-            for cal_event in cal_events_per_day_in_view {
-                let start_time = cal_event.start.as_ref().and_then(|d| d.date_time);
-                let end_time = cal_event.end.as_ref().and_then(|d| d.date_time);
+            let viewport_start = Local
+                .from_local_datetime(&day.and_hms_opt(start_hour, 0, 0).unwrap())
+                .unwrap()
+                .with_timezone(&Utc);
+            let viewport_end = Local
+                .from_local_datetime(&day.and_hms_opt(end_hour, 0, 0).unwrap())
+                .unwrap()
+                .with_timezone(&Utc);
+            let render_events = calculate_viewport_rect(
+                &self.cal_event_nodes,
+                viewport_start,
+                viewport_end,
+                &inner_area,
+            );
 
-                let (Some(start_time), Some(end_time)) = (start_time, end_time) else {
-                    continue;
+            for re in render_events {
+                let is_selected = self.sel_event_id.as_ref() == Some(&re.event.id);
+
+                let border_color = if is_selected {
+                    Color::Yellow
+                } else {
+                    Color::Cyan
                 };
 
-                let start_hour_scroll_adj =
-                    start_time.hour().saturating_sub(self.scroll_offset as u32) as u16;
-                let start_min_scroll_adj =
-                    start_hour_scroll_adj + (start_time.minute() as u16 / RESOLUTION_IN_MINS);
-
-                let inner_area = day_area.inner(Margin {
-                    vertical: 1,
-                    horizontal: 1,
-                });
-
-                let delta = end_time - start_time;
-                let duration_hours = delta.num_hours() * ROWS_PER_HOUR as i64;
-                let duration_mins = (delta.num_minutes() % 60) / RESOLUTION_IN_MINS as i64;
-                let duration = (duration_hours + duration_mins) as u16;
-
-                let event_area = Rect {
-                    x: inner_area.x,
-                    y: inner_area.y + start_min_scroll_adj,
-                    width: inner_area.width,
-                    height: duration,
+                let bg_color = if is_selected {
+                    Color::LightBlue
+                } else {
+                    Color::DarkGray
                 };
-                Paragraph::new(Line::from(
-                    cal_event
-                        .summary
-                        .as_ref()
-                        .unwrap_or(&"Untitled".to_string())
-                        .as_str(),
-                ))
-                .block(event_block.clone())
-                .render(event_area, buf);
+                let text_color = if is_selected {
+                    Color::Black
+                } else {
+                    Color::White
+                };
+
+                Paragraph::new(re.event.summary.as_str())
+                    .block(
+                        Block::default().borders(Borders::LEFT).border_style(
+                            Style::default()
+                                .fg(border_color)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                    )
+                    .style(Style::default().bg(bg_color).fg(text_color))
+                    .wrap(Wrap { trim: true })
+                    .render(re.rect, buf);
             }
         }
-
-        // let window_top = -self.scroll_offset;
-        // let window_bottom = -(self.scroll_offset + self.viewport_hours);
-        // let time_canvas = Canvas::default()
-        //     .block(right_border)
-        //     .x_bounds([0.0, 100.0])
-        //     .y_bounds([window_bottom as f64, window_top as f64])
-        //     .marker(ratatui::symbols::Marker::Dot)
-        //     .paint(|ctx| ctx.draw(timeline));
-
-        // time_canvas.render(time, buf);
     }
 }

@@ -9,7 +9,9 @@ pub async fn run() -> Result<()> {
     let events = cal.get_events().await?;
 
     let terminal = ratatui::init();
-    let result = App::new(events).run(terminal).await;
+    let mut app = App::new();
+    app.update_events(events);
+    let result = app.run(terminal).await;
     ratatui::restore();
 
     result

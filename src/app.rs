@@ -1,7 +1,8 @@
+use crate::Result;
 use crate::constants::{SCROLL_OFFSET, VIEWPORT_HOURS};
-use crate::event::{Event, EventHandler};
-use crate::{Result, event::AppEvent};
+use crate::event::{AppEvent, Event, EventHandler};
 
+use chrono::{DateTime, Utc};
 use google_calendar3::api::Event as CEvent;
 use ratatui::{
     DefaultTerminal,
@@ -9,24 +10,66 @@ use ratatui::{
 };
 
 #[derive(Debug)]
-pub struct App {
-    pub running: bool,
-    pub scroll_offset: i8,
-    pub viewport_hours: i8,
-    pub events: EventHandler,
-    pub cal_events: Vec<CEvent>,
+pub struct EventNode {
+    pub id: String,
+    pub summary: String,
+    pub start_time: DateTime<Utc>,
+    pub end_time: DateTime<Utc>,
 }
 
-impl App {
-    /// Constructs a new instance of [`App`].
-    pub fn new(cal_events: Vec<CEvent>) -> Self {
+impl TryFrom<CEvent> for EventNode {
+    type Error = ();
+
+    fn try_from(cal_event: CEvent) -> std::result::Result<Self, Self::Error> {
+        let event_start_datetime = cal_event.start.and_then(|d| d.date_time);
+        let event_end_datetime = cal_event.end.and_then(|d| d.date_time);
+
+        let (Some(event_start_datetime), Some(event_end_datetime)) =
+            (event_start_datetime, event_end_datetime)
+        else {
+            return Err(());
+        };
+
+        let summary = cal_event.summary.unwrap_or_else(|| "Untitled".to_string());
+
+        Ok(EventNode {
+            id: cal_event.id.unwrap(),
+            summary,
+            start_time: event_start_datetime,
+            end_time: event_end_datetime,
+        })
+    }
+}
+
+#[derive(Debug)]
+pub struct App {
+    pub running: bool,
+    pub events: EventHandler,
+
+    pub scroll_offset: u16,
+    pub viewport_hours: u16,
+    pub cal_event_nodes: Vec<EventNode>,
+
+    pub sel_event_id: Option<String>,
+}
+
+impl Default for App {
+    fn default() -> Self {
         Self {
             running: true,
             scroll_offset: SCROLL_OFFSET,
             viewport_hours: VIEWPORT_HOURS,
             events: EventHandler::new(),
-            cal_events,
+            cal_event_nodes: Default::default(),
+            sel_event_id: Default::default(),
         }
+    }
+}
+
+impl App {
+    /// Constructs a new instance of [`App`].
+    pub fn new() -> Self {
+        App::default()
     }
 
     /// Run the application's main loop.
@@ -76,5 +119,14 @@ impl App {
     /// Set running to false to quit the application.
     pub fn quit(&mut self) {
         self.running = false;
+    }
+
+    /// Transforms events to convenient structure
+    pub fn update_events(&mut self, events: Vec<CEvent>) {
+        self.cal_event_nodes = events
+            .into_iter()
+            .map(|e| e.try_into().ok())
+            .flatten()
+            .collect();
     }
 }
