@@ -84,10 +84,9 @@ impl Calendar {
         let end_of_week = start_of_week + Duration::days(7);
 
         // Google Calendar API requires dates in RFC3339 format
-        let time_min = start_of_week.to_rfc3339();
-        let time_max = end_of_week.to_rfc3339();
-
-        println!("Fetching events from {} to {}...\n", time_min, time_max);
+        // let time_min = start_of_week.to_rfc3339();
+        // let time_max = end_of_week.to_rfc3339();
+        // println!("Fetching events from {} to {}...\n", time_min, time_max);
 
         stream::iter(self.calendar_ids.iter().map(|cal_id| async move {
             let (_, event_list) = self
