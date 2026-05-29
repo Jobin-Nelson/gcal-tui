@@ -1,10 +1,9 @@
-use crate::{App, Config, Result};
+use crate::{App, Result};
 
 pub async fn run() -> Result<()> {
     // let config = Config::new()?;
 
     let terminal = ratatui::init();
-
     let result = App::new().run(terminal).await;
     ratatui::restore();
 
