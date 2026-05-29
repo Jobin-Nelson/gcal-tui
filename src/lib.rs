@@ -1,9 +1,11 @@
 mod config;
 mod controller;
 mod error;
+mod logging;
 
 mod app;
 pub mod calendar;
+pub mod constants;
 pub mod event;
 pub mod view;
 

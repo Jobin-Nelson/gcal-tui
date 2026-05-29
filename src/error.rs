@@ -1,3 +1,5 @@
+use std::env::VarError;
+
 use config::ConfigError;
 use derive_more::From;
 
@@ -8,6 +10,7 @@ pub enum Error {
     Io(std::io::Error),
     Config(ConfigError),
     Cal(google_calendar3::Error),
+    Env(VarError),
     Term,
 }
 

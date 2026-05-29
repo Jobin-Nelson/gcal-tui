@@ -1,15 +1,15 @@
-use crate::{App, Result};
+use crate::{App, Calendar, Config, Result, logging::initialize_logging};
 
 pub async fn run() -> Result<()> {
-    // let config = Config::new()?;
+    initialize_logging()?;
+    let config = Config::new()?;
+
+    let cal = Calendar::new(config.calendar_ids).await?;
+    let events = cal.get_events().await?;
 
     let terminal = ratatui::init();
-    let result = App::new().run(terminal).await;
+    let result = App::new(events).run(terminal).await;
     ratatui::restore();
-
-    // let cal = Calendar::new(config.calendar_ids).await?;
-    //
-    // let events = cal.get_events().await?;
 
     result
 }

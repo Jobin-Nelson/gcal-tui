@@ -1,8 +1,8 @@
-use crate::{
-    Result,
-    event::{AppEvent, Event, EventHandler},
-};
+use crate::constants::{SCROLL_OFFSET, VIEWPORT_HOURS};
+use crate::event::{Event, EventHandler};
+use crate::{Result, event::AppEvent};
 
+use google_calendar3::api::Event as CEvent;
 use ratatui::{
     DefaultTerminal,
     crossterm::event::{Event as CrosstermEvent, KeyCode, KeyEvent, KeyEventKind, KeyModifiers},
@@ -11,28 +11,22 @@ use ratatui::{
 #[derive(Debug)]
 pub struct App {
     pub running: bool,
-    pub counter: u8,
     pub scroll_offset: i8,
     pub viewport_hours: i8,
     pub events: EventHandler,
-}
-
-impl Default for App {
-    fn default() -> Self {
-        Self {
-            running: true,
-            counter: 0,
-            scroll_offset: 7,
-            viewport_hours: 6,
-            events: EventHandler::new(),
-        }
-    }
+    pub cal_events: Vec<CEvent>,
 }
 
 impl App {
     /// Constructs a new instance of [`App`].
-    pub fn new() -> Self {
-        Self::default()
+    pub fn new(cal_events: Vec<CEvent>) -> Self {
+        Self {
+            running: true,
+            scroll_offset: SCROLL_OFFSET,
+            viewport_hours: VIEWPORT_HOURS,
+            events: EventHandler::new(),
+            cal_events,
+        }
     }
 
     /// Run the application's main loop.
@@ -49,8 +43,8 @@ impl App {
                     _ => {}
                 },
                 Event::App(app_event) => match app_event {
-                    AppEvent::Increment => self.increment_counter(),
-                    AppEvent::Decrement => self.decrement_counter(),
+                    // AppEvent::Increment => self.increment_counter(),
+                    // AppEvent::Decrement => self.decrement_counter(),
                     AppEvent::Quit => self.quit(),
                 },
             }
@@ -65,8 +59,8 @@ impl App {
             KeyCode::Char('c' | 'C') if key_event.modifiers == KeyModifiers::CONTROL => {
                 self.events.send(AppEvent::Quit)
             }
-            KeyCode::Right => self.events.send(AppEvent::Increment),
-            KeyCode::Left => self.events.send(AppEvent::Decrement),
+            // KeyCode::Right => self.events.send(AppEvent::Increment),
+            // KeyCode::Left => self.events.send(AppEvent::Decrement),
             // Other handlers you could add here.
             _ => {}
         }
@@ -82,13 +76,5 @@ impl App {
     /// Set running to false to quit the application.
     pub fn quit(&mut self) {
         self.running = false;
-    }
-
-    pub fn increment_counter(&mut self) {
-        self.counter = self.counter.saturating_add(1);
-    }
-
-    pub fn decrement_counter(&mut self) {
-        self.counter = self.counter.saturating_sub(1);
     }
 }
