@@ -1,5 +1,5 @@
 use crate::Result;
-use crate::constants::{SCROLL_OFFSET, VIEWPORT_HOURS};
+use crate::constants::{MINUTES_IN_HOUR, RESOLUTION_IN_MINS, SCROLL_OFFSET_MINS, VIEWPORT_MINS};
 use crate::event::{AppEvent, Event, EventHandler};
 
 use chrono::{DateTime, Utc};
@@ -47,7 +47,7 @@ pub struct App {
     pub events: EventHandler,
 
     pub scroll_offset: u16,
-    pub viewport_hours: u16,
+    pub viewport_mins: u16,
     pub cal_event_nodes: Vec<EventNode>,
 
     pub sel_event_id: Option<String>,
@@ -57,8 +57,8 @@ impl Default for App {
     fn default() -> Self {
         Self {
             running: true,
-            scroll_offset: SCROLL_OFFSET,
-            viewport_hours: VIEWPORT_HOURS,
+            scroll_offset: SCROLL_OFFSET_MINS,
+            viewport_mins: VIEWPORT_MINS,
             events: EventHandler::new(),
             cal_event_nodes: Default::default(),
             sel_event_id: Default::default(),
@@ -86,6 +86,7 @@ impl App {
                     _ => {}
                 },
                 Event::App(app_event) => match app_event {
+                    AppEvent::ScrollDown => self.scroll_down(),
                     // AppEvent::Increment => self.increment_counter(),
                     // AppEvent::Decrement => self.decrement_counter(),
                     AppEvent::Quit => self.quit(),
@@ -102,6 +103,7 @@ impl App {
             KeyCode::Char('c' | 'C') if key_event.modifiers == KeyModifiers::CONTROL => {
                 self.events.send(AppEvent::Quit)
             }
+            KeyCode::Char('j') | KeyCode::Down => self.events.send(AppEvent::ScrollDown),
             // KeyCode::Right => self.events.send(AppEvent::Increment),
             // KeyCode::Left => self.events.send(AppEvent::Decrement),
             // Other handlers you could add here.
@@ -125,8 +127,13 @@ impl App {
     pub fn update_events(&mut self, events: Vec<CEvent>) {
         self.cal_event_nodes = events
             .into_iter()
-            .map(|e| e.try_into().ok())
-            .flatten()
+            .filter_map(|e| e.try_into().ok())
             .collect();
+    }
+
+    /// Scroll Calendar
+    fn scroll_down(&mut self) {
+        let max_offset = MINUTES_IN_HOUR.saturating_sub(self.viewport_mins);
+        self.scroll_offset = (self.scroll_offset + RESOLUTION_IN_MINS).min(max_offset);
     }
 }

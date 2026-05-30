@@ -12,7 +12,7 @@ use ratatui::{
 
 use crate::{
     app::{App, EventNode},
-    constants::{MTWTFSS, RESOLUTION_IN_MINS, ROWS_PER_HOUR},
+    constants::{MTWTFSS, RESOLUTION_IN_MINS},
 };
 
 #[derive(Debug)]
@@ -171,32 +171,32 @@ impl Widget for &App {
                     .render(header_column, buf);
             });
 
-        // Time
-        let start_hour = self.scroll_offset as u32;
-        let end_hour = (self.scroll_offset + self.viewport_hours) as u32;
+        // Time Gutter
+        let start_mins = self.scroll_offset;
+        let end_mins = self.scroll_offset + self.viewport_mins;
 
         let mut time_lines = Vec::new();
-        for hour in start_hour..end_hour {
-            for row_within_hour in 0..ROWS_PER_HOUR {
-                match row_within_hour {
-                    0 => {
-                        // Top of the hour (eg. 09:00)
-                        time_lines.push(
-                            Line::from(format!("{:02}:00", hour))
-                                .style(Style::default().fg(Color::Gray)),
-                        );
-                    }
-                    2 => {
-                        // Half-hour mark (30 mins)
-                        time_lines.push(
-                            Line::from(format!("{:02}:30", hour))
-                                .style(Style::default().fg(Color::Gray)),
-                        );
-                    }
-                    _ => {
-                        // 15, 45 minutes mark
-                        time_lines.push(Line::from(""));
-                    }
+        for row_time in (start_mins..end_mins).step_by(RESOLUTION_IN_MINS as usize) {
+            let hour = row_time / 60;
+            let row_within_hour = (row_time % 60) / RESOLUTION_IN_MINS;
+            match row_within_hour {
+                0 => {
+                    // Top of the hour (eg. 09:00)
+                    time_lines.push(
+                        Line::from(format!("{:02}:00", hour))
+                            .style(Style::default().fg(Color::Gray)),
+                    );
+                }
+                2 => {
+                    // Half-hour mark (30 mins)
+                    time_lines.push(
+                        Line::from(format!("{:02}:30", hour))
+                            .style(Style::default().fg(Color::Gray)),
+                    );
+                }
+                _ => {
+                    // 15, 45 minutes mark
+                    time_lines.push(Line::from(""));
                 }
             }
         }
@@ -221,15 +221,14 @@ impl Widget for &App {
                 horizontal: 1,
                 vertical: 1,
             });
+            let midnight = day.and_hms_opt(0, 0, 0).unwrap();
+            let start_of_day_local = Local.from_local_datetime(&midnight).unwrap();
 
-            let viewport_start = Local
-                .from_local_datetime(&day.and_hms_opt(start_hour, 0, 0).unwrap())
-                .unwrap()
-                .with_timezone(&Utc);
-            let viewport_end = Local
-                .from_local_datetime(&day.and_hms_opt(end_hour, 0, 0).unwrap())
-                .unwrap()
-                .with_timezone(&Utc);
+            let viewport_start =
+                (start_of_day_local + TimeDelta::minutes(start_mins as i64)).with_timezone(&Utc);
+            let viewport_end =
+                (start_of_day_local + TimeDelta::minutes(end_mins as i64)).with_timezone(&Utc);
+
             let render_events = calculate_viewport_rect(
                 &self.cal_event_nodes,
                 viewport_start,
