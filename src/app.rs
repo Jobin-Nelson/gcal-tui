@@ -1,5 +1,7 @@
 use crate::Result;
-use crate::constants::{MINUTES_IN_HOUR, RESOLUTION_IN_MINS, SCROLL_OFFSET_MINS, VIEWPORT_MINS};
+use crate::constants::{
+    MINUTES_IN_HOUR, RESOLUTION_IN_MINS, ROWS_PER_HOUR, SCROLL_OFFSET_MINS, VIEWPORT_MINS,
+};
 use crate::event::{AppEvent, Event, EventHandler};
 
 use chrono::{DateTime, Utc};
@@ -88,6 +90,8 @@ impl App {
                 Event::App(app_event) => match app_event {
                     AppEvent::ScrollUp => self.scroll_up(),
                     AppEvent::ScrollDown => self.scroll_down(),
+                    AppEvent::ScrollUpBig => self.big_scroll_up(),
+                    AppEvent::ScrollDownBig => self.big_scroll_down(),
                     // AppEvent::Increment => self.increment_counter(),
                     // AppEvent::Decrement => self.decrement_counter(),
                     AppEvent::Quit => self.quit(),
@@ -107,6 +111,8 @@ impl App {
             // Other handlers you could add here.
             KeyCode::Char('k') | KeyCode::Up => self.events.send(AppEvent::ScrollUp),
             KeyCode::Char('j') | KeyCode::Down => self.events.send(AppEvent::ScrollDown),
+            KeyCode::Char('K') => self.events.send(AppEvent::ScrollUpBig),
+            KeyCode::Char('J') => self.events.send(AppEvent::ScrollDownBig),
             _ => {}
         }
         Ok(())
@@ -140,9 +146,9 @@ impl App {
         self.scroll_offset = (self.scroll_offset + RESOLUTION_IN_MINS).min(max_offset);
     }
     fn big_scroll_up(&mut self) {
-        (0..2).for_each(|_| self.scroll_down());
+        (0..ROWS_PER_HOUR).for_each(|_| self.scroll_up());
     }
     fn big_scroll_down(&mut self) {
-        (0..2).for_each(|_| self.scroll_down());
+        (0..ROWS_PER_HOUR).for_each(|_| self.scroll_down());
     }
 }

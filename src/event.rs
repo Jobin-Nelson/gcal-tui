@@ -35,8 +35,10 @@ pub enum AppEvent {
     /// Quit the application.
     Quit,
 
-    ScrollDown,
     ScrollUp,
+    ScrollDown,
+    ScrollUpBig,
+    ScrollDownBig,
 }
 
 /// Terminal event handler.
@@ -48,13 +50,19 @@ pub struct EventHandler {
     receiver: mpsc::UnboundedReceiver<Event>,
 }
 
-impl EventHandler {
-    /// Constructs a new instance of [`EventHandler`] and spawns a new thread to handle events.
-    pub fn new() -> Self {
+impl Default for EventHandler {
+    fn default() -> Self {
         let (sender, receiver) = mpsc::unbounded_channel();
         let actor = EventTask::new(sender.clone());
         tokio::spawn(async { actor.run().await });
         Self { sender, receiver }
+    }
+}
+
+impl EventHandler {
+    /// Constructs a new instance of [`EventHandler`] and spawns a new thread to handle events.
+    pub fn new() -> Self {
+        Default::default()
     }
 
     /// Receives an event from the sender.
