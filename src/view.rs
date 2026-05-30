@@ -158,8 +158,8 @@ impl Widget for &App {
         let block = Block::bordered().merge_borders(MergeStrategy::Exact);
 
         // headers
-        let target_dates: Vec<NaiveDate> = (0..self.num_days)
-            .map(|i| self.start_date + TimeDelta::days(i as i64))
+        let target_dates: Vec<NaiveDate> = (0..self.num_days.num_days())
+            .map(|i| self.start_date + TimeDelta::days(i))
             .collect();
 
         std::iter::once("Time".to_string())
@@ -208,10 +208,6 @@ impl Widget for &App {
             .render(columns[0], buf);
 
         // Calendar
-        let target_dates: Vec<NaiveDate> = (0..self.num_days)
-            .map(|i| self.start_date + TimeDelta::days(i as i64))
-            .collect();
-
         for (day, day_area) in target_dates.iter().zip(columns.iter().skip(1)) {
             block.clone().render(*day_area, buf);
 

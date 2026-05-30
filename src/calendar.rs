@@ -1,4 +1,4 @@
-use chrono::{Datelike, Duration, Local};
+use chrono::{Local, NaiveDate};
 use futures::stream::{self, StreamExt, TryStreamExt};
 use google_calendar3::{
     CalendarHub,
@@ -17,6 +17,7 @@ use crate::Result;
 
 type Hub = CalendarHub<HttpsConnector<HttpConnector>>;
 
+#[derive(Clone)]
 pub struct Calendar {
     hub: Hub,
     calendar_ids: Vec<String>,
@@ -68,38 +69,38 @@ impl Calendar {
         })
     }
 
-    pub async fn get_events(&self) -> Result<Vec<Event>> {
+    pub async fn get_events(
+        &self,
+        start_date: NaiveDate,
+        end_date: NaiveDate,
+    ) -> Result<Vec<Event>> {
         // 4. Calculate the start and end of the current week (Monday to Sunday)
-        let now = Local::now();
-        let days_since_monday = now.weekday().num_days_from_monday() as i64;
-
-        // Set to midnight of the current Monday
-        let start_of_week = (now - Duration::days(days_since_monday))
-            .date_naive()
+        let start_time = start_date
+            .and_hms_opt(0, 0, 0)
+            .unwrap()
+            .and_local_timezone(Local)
+            .unwrap();
+        let end_time = end_date
             .and_hms_opt(0, 0, 0)
             .unwrap()
             .and_local_timezone(Local)
             .unwrap();
 
-        let end_of_week = start_of_week + Duration::days(7);
-
-        // Google Calendar API requires dates in RFC3339 format
-        // let time_min = start_of_week.to_rfc3339();
-        // let time_max = end_of_week.to_rfc3339();
-        // println!("Fetching events from {} to {}...\n", time_min, time_max);
-
-        stream::iter(self.calendar_ids.iter().map(|cal_id| async move {
-            let (_, event_list) = self
-                .hub
-                .events()
-                .list(cal_id)
-                .time_min(start_of_week.to_utc())
-                .time_max(end_of_week.to_utc())
-                .single_events(true) // Crucial: expands recurring events into individual instances
-                .order_by("startTime") // Returns them chronologically
-                .doit()
-                .await?;
-            Ok(event_list.items.unwrap_or_default())
+        let cal_ids = self.calendar_ids.clone();
+        stream::iter(cal_ids.into_iter().map(|cal_id| {
+            let hub_clone = self.hub.clone();
+            async move {
+                let (_, event_list) = hub_clone
+                    .events()
+                    .list(&cal_id)
+                    .time_min(start_time.to_utc())
+                    .time_max(end_time.to_utc())
+                    .single_events(true) // Crucial: expands recurring events into individual instances
+                    .order_by("startTime") // Returns them chronologically
+                    .doit()
+                    .await?;
+                Ok(event_list.items.unwrap_or_default())
+            }
         }))
         .buffer_unordered(5)
         .try_concat()

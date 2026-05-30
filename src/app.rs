@@ -1,8 +1,9 @@
-use crate::Result;
 use crate::constants::{
-    MINUTES_IN_HOUR, NUM_DAYS, RESOLUTION_IN_MINS, ROWS_PER_HOUR, SCROLL_OFFSET_MINS, VIEWPORT_MINS,
+    BUFFER_DAYS, FETCH_DAYS, MINUTES_IN_HOUR, NUM_DAYS, RESOLUTION_IN_MINS, ROWS_PER_HOUR,
+    SCROLL_OFFSET_MINS, VIEWPORT_MINS,
 };
-use crate::event::{AppEvent, Event, EventHandler};
+use crate::event::{AppEvent, Event, EventHandler, EventsFetched};
+use crate::{Calendar, Config, Result};
 
 use chrono::{DateTime, Local, NaiveDate, TimeDelta, Utc};
 use google_calendar3::api::Event as CEvent;
@@ -11,7 +12,7 @@ use ratatui::{
     crossterm::event::{Event as CrosstermEvent, KeyCode, KeyEvent, KeyEventKind, KeyModifiers},
 };
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct EventNode {
     pub id: String,
     pub summary: String,
@@ -43,25 +44,44 @@ impl TryFrom<CEvent> for EventNode {
     }
 }
 
-#[derive(Debug)]
+#[derive(Default)]
+pub enum AppMode {
+    #[default]
+    Normal,
+    Fetching,
+}
+
 pub struct App {
     pub running: bool,
     pub events: EventHandler,
+
+    pub mode: AppMode,
 
     pub scroll_offset: u16,
     pub viewport_mins: u16,
     pub cal_event_nodes: Vec<EventNode>,
     pub start_date: NaiveDate,
-    pub num_days: u16,
+    pub num_days: TimeDelta,
+    pub now: DateTime<Local>,
 
     pub sel_event_id: Option<String>,
+    pub cal: Calendar,
+    pub loaded_start: NaiveDate,
+    pub loaded_end: NaiveDate,
 }
 
-impl Default for App {
-    fn default() -> Self {
+impl App {
+    /// Constructs a new instance of [`App`].
+    pub async fn new() -> Result<Self> {
+        let config = Config::new()?;
+
+        let cal = Calendar::new(config.calendar_ids).await?;
+
         let yesterday = Local::now().date_naive() - TimeDelta::days(1);
-        Self {
+
+        let mut app = App {
             running: true,
+            mode: Default::default(),
             scroll_offset: SCROLL_OFFSET_MINS,
             viewport_mins: VIEWPORT_MINS,
             events: Default::default(),
@@ -69,14 +89,15 @@ impl Default for App {
             sel_event_id: Default::default(),
             start_date: yesterday,
             num_days: NUM_DAYS,
-        }
-    }
-}
+            cal,
+            now: Local::now(),
+            loaded_start: yesterday,
+            loaded_end: yesterday,
+        };
 
-impl App {
-    /// Constructs a new instance of [`App`].
-    pub fn new() -> Self {
-        App::default()
+        app.fetch_events(yesterday, yesterday + app.num_days);
+
+        Ok(app)
     }
 
     /// Run the application's main loop.
@@ -104,6 +125,10 @@ impl App {
                     // Scroll Horizontally
                     AppEvent::ScrollLeft => self.scroll_left(),
                     AppEvent::ScrollRight => self.scroll_right(),
+
+                    // Fetch Events
+                    AppEvent::FetchSuccess(events_fetched) => self.update_events(events_fetched),
+                    AppEvent::FetchFailed(_) => self.mode = Default::default(),
                 },
             }
         }
@@ -144,11 +169,44 @@ impl App {
     }
 
     /// Transforms events to convenient structure
-    pub fn update_events(&mut self, events: Vec<CEvent>) {
-        self.cal_event_nodes = events
-            .into_iter()
-            .filter_map(|e| e.try_into().ok())
-            .collect();
+    pub fn fetch_events(&mut self, start_date: NaiveDate, end_date: NaiveDate) {
+        if let AppMode::Fetching = self.mode {
+            return;
+        }
+        self.mode = AppMode::Fetching;
+
+        let cal_clone = self.cal.clone();
+        let sender = self.events.sender.clone();
+
+        tokio::spawn(async move {
+            match cal_clone.get_events(start_date, end_date).await {
+                Ok(events) => {
+                    let event_nodes = events
+                        .into_iter()
+                        .filter_map(|e| e.try_into().ok())
+                        .collect();
+                    let _ = sender.send(Event::App(AppEvent::FetchSuccess(EventsFetched {
+                        event_nodes,
+                        start_date,
+                        end_date,
+                    })));
+                }
+                Err(e) => {
+                    let _ = sender.send(Event::App(AppEvent::FetchFailed(e.to_string())));
+                }
+            }
+        });
+    }
+
+    /// Transforms events to convenient structure
+    pub fn update_events(&mut self, mut events_fetched: EventsFetched) {
+        self.cal_event_nodes.append(&mut events_fetched.event_nodes);
+        self.cal_event_nodes.sort_by_key(|e| e.start_time);
+
+        self.loaded_start = self.loaded_start.min(events_fetched.start_date);
+        self.loaded_end = self.loaded_end.max(events_fetched.end_date);
+
+        self.mode = Default::default();
     }
 
     /// Scroll vertically
@@ -169,8 +227,23 @@ impl App {
     /// Scroll horizontally
     fn scroll_left(&mut self) {
         self.start_date -= TimeDelta::days(1);
+        self.check_pagination();
     }
     fn scroll_right(&mut self) {
         self.start_date += TimeDelta::days(1);
+        self.check_pagination();
+    }
+
+    // Pagination
+    fn check_pagination(&mut self) {
+        if let AppMode::Fetching = self.mode {
+            return;
+        }
+
+        if self.start_date + self.num_days + BUFFER_DAYS >= self.loaded_end {
+            self.fetch_events(self.loaded_end, self.loaded_end + FETCH_DAYS);
+        } else if self.start_date - BUFFER_DAYS <= self.loaded_start {
+            self.fetch_events(self.loaded_start - FETCH_DAYS, self.loaded_start);
+        }
     }
 }

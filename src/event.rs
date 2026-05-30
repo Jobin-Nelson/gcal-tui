@@ -1,5 +1,6 @@
-use crate::Result;
+use crate::{Result, app::EventNode};
 
+use chrono::NaiveDate;
 use futures::{FutureExt, StreamExt};
 use ratatui::crossterm::{self, event::Event as CrosstermEvent};
 use std::time::Duration;
@@ -27,6 +28,13 @@ pub enum Event {
     App(AppEvent),
 }
 
+#[derive(Debug, Clone)]
+pub struct EventsFetched {
+    pub event_nodes: Vec<EventNode>,
+    pub start_date: NaiveDate,
+    pub end_date: NaiveDate,
+}
+
 /// Application events.
 ///
 /// You can extend this enum with your own custom events.
@@ -35,6 +43,11 @@ pub enum AppEvent {
     /// Quit the application.
     Quit,
 
+    // Fetch
+    FetchSuccess(EventsFetched),
+    FetchFailed(String),
+
+    // Navigation
     ScrollUp,
     ScrollDown,
     ScrollUpBig,
@@ -48,7 +61,7 @@ pub enum AppEvent {
 #[derive(Debug)]
 pub struct EventHandler {
     /// Event sender channel.
-    sender: mpsc::UnboundedSender<Event>,
+    pub sender: mpsc::UnboundedSender<Event>,
     /// Event receiver channel.
     receiver: mpsc::UnboundedReceiver<Event>,
 }
