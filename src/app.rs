@@ -86,6 +86,7 @@ impl App {
                     _ => {}
                 },
                 Event::App(app_event) => match app_event {
+                    AppEvent::ScrollUp => self.scroll_up(),
                     AppEvent::ScrollDown => self.scroll_down(),
                     // AppEvent::Increment => self.increment_counter(),
                     // AppEvent::Decrement => self.decrement_counter(),
@@ -103,10 +104,9 @@ impl App {
             KeyCode::Char('c' | 'C') if key_event.modifiers == KeyModifiers::CONTROL => {
                 self.events.send(AppEvent::Quit)
             }
-            KeyCode::Char('j') | KeyCode::Down => self.events.send(AppEvent::ScrollDown),
-            // KeyCode::Right => self.events.send(AppEvent::Increment),
-            // KeyCode::Left => self.events.send(AppEvent::Decrement),
             // Other handlers you could add here.
+            KeyCode::Char('k') | KeyCode::Up => self.events.send(AppEvent::ScrollUp),
+            KeyCode::Char('j') | KeyCode::Down => self.events.send(AppEvent::ScrollDown),
             _ => {}
         }
         Ok(())
@@ -132,8 +132,17 @@ impl App {
     }
 
     /// Scroll Calendar
+    fn scroll_up(&mut self) {
+        self.scroll_offset = self.scroll_offset.saturating_sub(RESOLUTION_IN_MINS);
+    }
     fn scroll_down(&mut self) {
         let max_offset = MINUTES_IN_HOUR.saturating_sub(self.viewport_mins);
         self.scroll_offset = (self.scroll_offset + RESOLUTION_IN_MINS).min(max_offset);
+    }
+    fn big_scroll_up(&mut self) {
+        (0..2).for_each(|_| self.scroll_down());
+    }
+    fn big_scroll_down(&mut self) {
+        (0..2).for_each(|_| self.scroll_down());
     }
 }

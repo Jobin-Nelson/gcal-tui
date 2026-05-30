@@ -36,6 +36,7 @@ pub enum AppEvent {
     Quit,
 
     ScrollDown,
+    ScrollUp,
 }
 
 /// Terminal event handler.
