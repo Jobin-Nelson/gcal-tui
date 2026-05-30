@@ -9,9 +9,15 @@ pub type Result<T> = core::result::Result<T, Error>;
 pub enum Error {
     Io(std::io::Error),
     Config(ConfigError),
-    Cal(google_calendar3::Error),
+    Cal(Box<google_calendar3::Error>),
     Env(VarError),
     Term,
+}
+
+impl From<google_calendar3::Error> for Error {
+    fn from(value: google_calendar3::Error) -> Self {
+        Error::Cal(Box::new(value))
+    }
 }
 
 // region:    --- Error Boilerplate
