@@ -1,6 +1,6 @@
 use std::cmp::Reverse;
 
-use chrono::{DateTime, Datelike, Local, TimeDelta, TimeZone, Utc};
+use chrono::{DateTime, Local, NaiveDate, TimeDelta, TimeZone, Utc};
 use ratatui::{
     buffer::Buffer,
     layout::{Alignment, Constraint, Layout, Margin, Rect, Spacing},
@@ -12,7 +12,7 @@ use ratatui::{
 
 use crate::{
     app::{App, EventNode},
-    constants::{MTWTFSS, RESOLUTION_IN_MINS},
+    constants::RESOLUTION_IN_MINS,
 };
 
 #[derive(Debug)]
@@ -158,11 +158,12 @@ impl Widget for &App {
         let block = Block::bordered().merge_borders(MergeStrategy::Exact);
 
         // headers
-        let current_datetime = Local::now();
-        let current_day = current_datetime.weekday();
-        let day_headers = [current_day.pred(), current_day, current_day.succ()];
-        std::iter::once("Time")
-            .chain(day_headers.map(|d| MTWTFSS[d.num_days_from_monday() as usize]))
+        let target_dates: Vec<NaiveDate> = (0..self.num_days)
+            .map(|i| self.start_date + TimeDelta::days(i as i64))
+            .collect();
+
+        std::iter::once("Time".to_string())
+            .chain(target_dates.iter().map(|d| d.format("%a").to_string()))
             .zip(header_columns.iter())
             .for_each(|(header, &header_column)| {
                 Paragraph::new(header)
@@ -207,12 +208,9 @@ impl Widget for &App {
             .render(columns[0], buf);
 
         // Calendar
-        let today_local = Local::now().date_naive();
-        let target_dates = [
-            today_local - TimeDelta::days(1), // Yesterday
-            today_local,                      // Today
-            today_local + TimeDelta::days(1), // Tommorrow
-        ];
+        let target_dates: Vec<NaiveDate> = (0..self.num_days)
+            .map(|i| self.start_date + TimeDelta::days(i as i64))
+            .collect();
 
         for (day, day_area) in target_dates.iter().zip(columns.iter().skip(1)) {
             block.clone().render(*day_area, buf);

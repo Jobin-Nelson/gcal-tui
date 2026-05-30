@@ -1,10 +1,10 @@
 use crate::Result;
 use crate::constants::{
-    MINUTES_IN_HOUR, RESOLUTION_IN_MINS, ROWS_PER_HOUR, SCROLL_OFFSET_MINS, VIEWPORT_MINS,
+    MINUTES_IN_HOUR, NUM_DAYS, RESOLUTION_IN_MINS, ROWS_PER_HOUR, SCROLL_OFFSET_MINS, VIEWPORT_MINS,
 };
 use crate::event::{AppEvent, Event, EventHandler};
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Local, NaiveDate, TimeDelta, Utc};
 use google_calendar3::api::Event as CEvent;
 use ratatui::{
     DefaultTerminal,
@@ -51,19 +51,24 @@ pub struct App {
     pub scroll_offset: u16,
     pub viewport_mins: u16,
     pub cal_event_nodes: Vec<EventNode>,
+    pub start_date: NaiveDate,
+    pub num_days: u16,
 
     pub sel_event_id: Option<String>,
 }
 
 impl Default for App {
     fn default() -> Self {
+        let yesterday = Local::now().date_naive() - TimeDelta::days(1);
         Self {
             running: true,
             scroll_offset: SCROLL_OFFSET_MINS,
             viewport_mins: VIEWPORT_MINS,
-            events: EventHandler::new(),
+            events: Default::default(),
             cal_event_nodes: Default::default(),
             sel_event_id: Default::default(),
+            start_date: yesterday,
+            num_days: NUM_DAYS,
         }
     }
 }
@@ -88,13 +93,17 @@ impl App {
                     _ => {}
                 },
                 Event::App(app_event) => match app_event {
+                    AppEvent::Quit => self.quit(),
+
+                    // Scroll Vertically
                     AppEvent::ScrollUp => self.scroll_up(),
                     AppEvent::ScrollDown => self.scroll_down(),
                     AppEvent::ScrollUpBig => self.big_scroll_up(),
                     AppEvent::ScrollDownBig => self.big_scroll_down(),
-                    // AppEvent::Increment => self.increment_counter(),
-                    // AppEvent::Decrement => self.decrement_counter(),
-                    AppEvent::Quit => self.quit(),
+
+                    // Scroll Horizontally
+                    AppEvent::ScrollLeft => self.scroll_left(),
+                    AppEvent::ScrollRight => self.scroll_right(),
                 },
             }
         }
@@ -109,10 +118,15 @@ impl App {
                 self.events.send(AppEvent::Quit)
             }
             // Other handlers you could add here.
+            // Scroll vertically
             KeyCode::Char('k') | KeyCode::Up => self.events.send(AppEvent::ScrollUp),
             KeyCode::Char('j') | KeyCode::Down => self.events.send(AppEvent::ScrollDown),
             KeyCode::Char('K') => self.events.send(AppEvent::ScrollUpBig),
             KeyCode::Char('J') => self.events.send(AppEvent::ScrollDownBig),
+
+            // Scroll horizontally
+            KeyCode::Char('h') => self.events.send(AppEvent::ScrollLeft),
+            KeyCode::Char('l') => self.events.send(AppEvent::ScrollRight),
             _ => {}
         }
         Ok(())
@@ -137,7 +151,7 @@ impl App {
             .collect();
     }
 
-    /// Scroll Calendar
+    /// Scroll vertically
     fn scroll_up(&mut self) {
         self.scroll_offset = self.scroll_offset.saturating_sub(RESOLUTION_IN_MINS);
     }
@@ -150,5 +164,13 @@ impl App {
     }
     fn big_scroll_down(&mut self) {
         (0..ROWS_PER_HOUR).for_each(|_| self.scroll_down());
+    }
+
+    /// Scroll horizontally
+    fn scroll_left(&mut self) {
+        self.start_date -= TimeDelta::days(1);
+    }
+    fn scroll_right(&mut self) {
+        self.start_date += TimeDelta::days(1);
     }
 }

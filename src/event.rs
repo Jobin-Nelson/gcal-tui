@@ -39,6 +39,9 @@ pub enum AppEvent {
     ScrollDown,
     ScrollUpBig,
     ScrollDownBig,
+
+    ScrollLeft,
+    ScrollRight,
 }
 
 /// Terminal event handler.
