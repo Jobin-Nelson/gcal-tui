@@ -7,7 +7,7 @@ use ratatui::{
     style::{Color, Modifier, Style},
     symbols::merge::MergeStrategy,
     text::Line,
-    widgets::{Block, BorderType, Borders, Paragraph, Widget, Wrap},
+    widgets::{Block, Borders, Paragraph, Widget, Wrap},
 };
 
 use crate::{
@@ -15,6 +15,7 @@ use crate::{
     constants::{MTWTFSS, RESOLUTION_IN_MINS, ROWS_PER_HOUR},
 };
 
+#[derive(Debug)]
 struct RenderedEvent<'a> {
     pub event: &'a EventNode,
     pub rect: Rect,
@@ -42,11 +43,11 @@ fn calculate_viewport_rect<'a, 'b>(
 
             // TODO: Is clamped time really needed?
             let clamped_start = ev.start_time.max(viewport_start);
-            let clamped_end = ev.end_time.max(viewport_end);
+            let clamped_end = ev.end_time.min(viewport_end);
 
             // Calculate total minutes from top of the screen
             let start_mins = (clamped_start - viewport_start).num_minutes();
-            let end_mins = (clamped_end - viewport_end).num_minutes();
+            let end_mins = (clamped_end - viewport_start).num_minutes();
 
             // Convert minutes to terminal rows
             let start_row = start_mins as u16 / RESOLUTION_IN_MINS;
