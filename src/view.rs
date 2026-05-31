@@ -1,6 +1,6 @@
 use std::cmp::Reverse;
 
-use chrono::{DateTime, Local, NaiveDate, TimeDelta, TimeZone, Utc};
+use chrono::{DateTime, Local, NaiveDate, TimeDelta, TimeZone, Timelike, Utc};
 use ratatui::{
     buffer::Buffer,
     layout::{Alignment, Constraint, Layout, Margin, Rect, Spacing},
@@ -261,6 +261,32 @@ impl Widget for &App {
                     .style(Style::default().bg(bg_color).fg(text_color))
                     .wrap(Wrap { trim: true })
                     .render(re.rect, buf);
+            }
+
+            // Draw current time line
+            if *day == self.now.date_naive() {
+                let current_mins = (self.now.hour() * 60 + self.now.minute()) as u16;
+                let start_mins = self.scroll_offset;
+                let end_mins = start_mins + self.viewport_mins;
+
+                if current_mins >= start_mins && current_mins < end_mins {
+                    let rel_mins = current_mins - start_mins;
+                    let y_offset = rel_mins / RESOLUTION_IN_MINS;
+
+                    let timeline_rect = Rect {
+                        x: inner_area.x,
+                        y: inner_area.y + y_offset,
+                        width: inner_area.width,
+                        height: 1,
+                    };
+
+                    let line_width = inner_area.width.saturating_sub(1) as usize;
+                    let line_str = format!("{}", "━".repeat(line_width));
+
+                    Paragraph::new(line_str)
+                        .style(Style::default().fg(Color::Red))
+                        .render(timeline_rect, buf);
+                }
             }
         }
     }

@@ -96,6 +96,7 @@ impl App {
         };
 
         app.fetch_events(yesterday, yesterday + app.num_days);
+        app.jump_to_current_time();
 
         Ok(app)
     }
@@ -127,7 +128,7 @@ impl App {
                     AppEvent::ScrollRight => self.scroll_right(),
 
                     // Jump to current time
-                    AppEvent::JumpToNow => self.jumpt_to_current_time(),
+                    AppEvent::JumpToNow => self.jump_to_current_time(),
 
                     // Fetch Events
                     AppEvent::FetchSuccess(events_fetched) => self.update_events(events_fetched),
@@ -254,7 +255,7 @@ impl App {
     }
 
     // Jumps to calendar to Today and centers the current time in the viewport
-    pub fn jumpt_to_current_time(&mut self) {
+    pub fn jump_to_current_time(&mut self) {
         self.now = Local::now();
 
         self.start_date = self.now.date_naive() - START_OFFSET;
