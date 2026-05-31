@@ -96,13 +96,18 @@ impl App {
         };
 
         app.fetch_events(yesterday, yesterday + app.num_days);
-        app.jump_to_current_time();
 
         Ok(app)
     }
 
     /// Run the application's main loop.
     pub async fn run(mut self, mut terminal: DefaultTerminal) -> Result<()> {
+        if let Ok(size) = terminal.size() {
+            self.update_viewport_from_height(size.height);
+        }
+
+        self.jump_to_current_time();
+
         while self.running {
             terminal.draw(|frame| frame.render_widget(&self, frame.area()))?;
             match self.events.next().await? {
@@ -111,7 +116,10 @@ impl App {
                     CrosstermEvent::Key(key_event) if key_event.kind == KeyEventKind::Press => {
                         self.handle_key_events(key_event)?
                     }
-                    CrosstermEvent::Resize(_, _) => terminal.autoresize()?,
+                    CrosstermEvent::Resize(_width, height) => {
+                        terminal.autoresize()?;
+                        self.update_viewport_from_height(height);
+                    }
                     _ => {}
                 },
                 Event::App(app_event) => match app_event {
@@ -255,7 +263,7 @@ impl App {
     }
 
     // Jumps to calendar to Today and centers the current time in the viewport
-    pub fn jump_to_current_time(&mut self) {
+    fn jump_to_current_time(&mut self) {
         self.now = Local::now();
 
         self.start_date = self.now.date_naive() - START_OFFSET;
@@ -269,5 +277,15 @@ impl App {
         let max_offset = MINUTES_IN_DAY.saturating_sub(self.viewport_mins);
 
         self.scroll_offset = target_offset.min(max_offset);
+    }
+
+    pub fn update_viewport_from_height(&mut self, term_height: u16) {
+        let vertical_overhead = 4;
+        let usable_rows = term_height.saturating_sub(vertical_overhead);
+        self.viewport_mins = usable_rows * RESOLUTION_IN_MINS;
+
+        // if the window got taller, the max offset shrinks
+        let max_offset = MINUTES_IN_DAY.saturating_sub(self.viewport_mins);
+        self.scroll_offset = self.scroll_offset.min(max_offset);
     }
 }

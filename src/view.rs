@@ -207,7 +207,7 @@ impl Widget for &App {
             .block(block.clone())
             .render(columns[0], buf);
 
-        // Calendar
+        // Draw events
         for (day, day_area) in target_dates.iter().zip(columns.iter().skip(1)) {
             block.clone().render(*day_area, buf);
 
@@ -233,21 +233,10 @@ impl Widget for &App {
             for re in render_events {
                 let is_selected = self.sel_event_id.as_ref() == Some(&re.event.id);
 
-                let border_color = if is_selected {
-                    Color::Yellow
+                let (border_color, bg_color, text_color) = if is_selected {
+                    (Color::Yellow, Color::LightBlue, Color::Black)
                 } else {
-                    Color::Cyan
-                };
-
-                let bg_color = if is_selected {
-                    Color::LightBlue
-                } else {
-                    Color::DarkGray
-                };
-                let text_color = if is_selected {
-                    Color::Black
-                } else {
-                    Color::White
+                    (Color::Cyan, Color::DarkGray, Color::White)
                 };
 
                 Paragraph::new(re.event.summary.as_str())
