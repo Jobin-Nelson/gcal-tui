@@ -95,7 +95,10 @@ impl App {
             loaded_end: yesterday,
         };
 
-        app.fetch_events(yesterday, yesterday + app.num_days);
+        app.fetch_events(
+            yesterday - BUFFER_DAYS,
+            yesterday + app.num_days + BUFFER_DAYS,
+        );
 
         Ok(app)
     }
@@ -214,7 +217,7 @@ impl App {
     }
 
     /// Transforms events to convenient structure
-    pub fn update_events(&mut self, mut events_fetched: EventsFetched) {
+    fn update_events(&mut self, mut events_fetched: EventsFetched) {
         self.cal_event_nodes.append(&mut events_fetched.event_nodes);
         self.cal_event_nodes.sort_by_key(|e| e.start_time);
 
@@ -269,17 +272,14 @@ impl App {
         self.start_date = self.now.date_naive() - START_OFFSET;
 
         let current_mins = self.now.hour() * 60 + self.now.minute();
-
         let half_viewport = self.viewport_mins / 2;
-
         let target_offset = (current_mins as u16).saturating_sub(half_viewport);
-
         let max_offset = MINUTES_IN_DAY.saturating_sub(self.viewport_mins);
 
         self.scroll_offset = target_offset.min(max_offset);
     }
 
-    pub fn update_viewport_from_height(&mut self, term_height: u16) {
+    fn update_viewport_from_height(&mut self, term_height: u16) {
         let vertical_overhead = 4;
         let usable_rows = term_height.saturating_sub(vertical_overhead);
         self.viewport_mins = usable_rows * RESOLUTION_IN_MINS;
