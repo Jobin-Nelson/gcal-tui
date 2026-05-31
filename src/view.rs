@@ -163,7 +163,7 @@ impl Widget for &App {
             .collect();
 
         std::iter::once("Time".to_string())
-            .chain(target_dates.iter().map(|d| d.format("%a").to_string()))
+            .chain(target_dates.iter().map(|d| d.format("%A").to_string()))
             .zip(header_columns.iter())
             .for_each(|(header, &header_column)| {
                 Paragraph::new(header)

@@ -1,11 +1,11 @@
 use crate::constants::{
-    BUFFER_DAYS, FETCH_DAYS, MINUTES_IN_HOUR, NUM_DAYS, RESOLUTION_IN_MINS, ROWS_PER_HOUR,
-    SCROLL_OFFSET_MINS, VIEWPORT_MINS,
+    BUFFER_DAYS, FETCH_DAYS, MINUTES_IN_DAY, NUM_DAYS, RESOLUTION_IN_MINS, ROWS_PER_HOUR,
+    SCROLL_OFFSET_MINS, START_OFFSET, VIEWPORT_MINS,
 };
 use crate::event::{AppEvent, Event, EventHandler, EventsFetched};
 use crate::{Calendar, Config, Result};
 
-use chrono::{DateTime, Local, NaiveDate, TimeDelta, Utc};
+use chrono::{DateTime, Local, NaiveDate, TimeDelta, Timelike, Utc};
 use google_calendar3::api::Event as CEvent;
 use ratatui::{
     DefaultTerminal,
@@ -77,7 +77,7 @@ impl App {
 
         let cal = Calendar::new(config.calendar_ids).await?;
 
-        let yesterday = Local::now().date_naive() - TimeDelta::days(1);
+        let yesterday = Local::now().date_naive() - START_OFFSET;
 
         let mut app = App {
             running: true,
@@ -126,6 +126,9 @@ impl App {
                     AppEvent::ScrollLeft => self.scroll_left(),
                     AppEvent::ScrollRight => self.scroll_right(),
 
+                    // Jump to current time
+                    AppEvent::JumpToNow => self.jumpt_to_current_time(),
+
                     // Fetch Events
                     AppEvent::FetchSuccess(events_fetched) => self.update_events(events_fetched),
                     AppEvent::FetchFailed(_) => self.mode = Default::default(),
@@ -152,6 +155,9 @@ impl App {
             // Scroll horizontally
             KeyCode::Char('h') => self.events.send(AppEvent::ScrollLeft),
             KeyCode::Char('l') => self.events.send(AppEvent::ScrollRight),
+
+            // Jump to current time
+            KeyCode::Char('t') => self.events.send(AppEvent::JumpToNow),
             _ => {}
         }
         Ok(())
@@ -214,7 +220,7 @@ impl App {
         self.scroll_offset = self.scroll_offset.saturating_sub(RESOLUTION_IN_MINS);
     }
     fn scroll_down(&mut self) {
-        let max_offset = MINUTES_IN_HOUR.saturating_sub(self.viewport_mins);
+        let max_offset = MINUTES_IN_DAY.saturating_sub(self.viewport_mins);
         self.scroll_offset = (self.scroll_offset + RESOLUTION_IN_MINS).min(max_offset);
     }
     fn big_scroll_up(&mut self) {
@@ -245,5 +251,22 @@ impl App {
         } else if self.start_date - BUFFER_DAYS <= self.loaded_start {
             self.fetch_events(self.loaded_start - FETCH_DAYS, self.loaded_start);
         }
+    }
+
+    // Jumps to calendar to Today and centers the current time in the viewport
+    pub fn jumpt_to_current_time(&mut self) {
+        self.now = Local::now();
+
+        self.start_date = self.now.date_naive() - START_OFFSET;
+
+        let current_mins = self.now.hour() * 60 + self.now.minute();
+
+        let half_viewport = self.viewport_mins / 2;
+
+        let target_offset = (current_mins as u16).saturating_sub(half_viewport);
+
+        let max_offset = MINUTES_IN_DAY.saturating_sub(self.viewport_mins);
+
+        self.scroll_offset = target_offset.min(max_offset);
     }
 }
