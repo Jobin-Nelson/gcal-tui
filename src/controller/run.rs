@@ -4,8 +4,9 @@ pub async fn run() -> Result<()> {
     initialize_logging()?;
     tracing::info!("HELLO");
 
-    let terminal = ratatui::init();
     let app = App::new().await?;
+
+    let terminal = ratatui::init();
     let result = app.run(terminal).await;
     ratatui::restore();
 

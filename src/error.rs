@@ -13,6 +13,8 @@ pub enum Error {
     Env(VarError),
     Term,
     Shell(shellexpand::LookupError<VarError>),
+
+    ConfigNotFound,
 }
 
 impl From<google_calendar3::Error> for Error {
