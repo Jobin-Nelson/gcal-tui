@@ -12,6 +12,7 @@ pub enum Error {
     Cal(Box<google_calendar3::Error>),
     Env(VarError),
     Term,
+    Shell(shellexpand::LookupError<VarError>),
 }
 
 impl From<google_calendar3::Error> for Error {

@@ -1,7 +1,7 @@
 use crate::Result;
 
 use serde::Deserialize;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Deserialize)]
 pub struct Config {
@@ -19,7 +19,16 @@ impl Config {
             )))
             .build()
             .unwrap();
-        // settings.try_deserialize().map_err(Error::Config)
-        settings.try_deserialize().map_err(Into::into)
+        let mut config: Config = settings.try_deserialize()?;
+
+        config.client_file = expand_filepath(&config.client_file)?;
+
+        Ok(config)
     }
+}
+
+fn expand_filepath(path: &Path) -> Result<PathBuf> {
+    let path_str = path.to_string_lossy();
+    let expanded_path_str = shellexpand::full(&path_str)?;
+    Ok(PathBuf::from(expanded_path_str.as_ref()))
 }

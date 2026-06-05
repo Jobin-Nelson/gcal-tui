@@ -75,7 +75,7 @@ impl App {
     pub async fn new() -> Result<Self> {
         let config = Config::new()?;
 
-        let cal = Calendar::new(config.calendar_ids).await?;
+        let cal = Calendar::new(config).await?;
 
         let yesterday = Local::now().date_naive() - START_OFFSET;
 
@@ -186,7 +186,7 @@ impl App {
         self.running = false;
     }
 
-    /// Transforms events to convenient structure
+    /// Trigger background fetch for new events
     pub fn fetch_events(&mut self, start_date: NaiveDate, end_date: NaiveDate) {
         if let AppMode::Fetching = self.mode {
             return;

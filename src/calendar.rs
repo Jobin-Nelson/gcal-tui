@@ -13,7 +13,7 @@ use google_calendar3::{
     },
 };
 
-use crate::Result;
+use crate::{Config, Result};
 
 type Hub = CalendarHub<HttpsConnector<HttpConnector>>;
 
@@ -24,9 +24,10 @@ pub struct Calendar {
 }
 
 impl Calendar {
-    pub async fn new(calendar_ids: Vec<String>) -> Result<Self> {
+    pub async fn new(config: Config) -> Result<Self> {
         // 1. Load the client_secret.json you downloaded from Google Cloud
-        let secret = read_application_secret("client_secret.json").await?;
+        let calendar_ids = config.calendar_ids;
+        let secret = read_application_secret(config.client_file).await?;
 
         // 2. Set up the OAuth2 authenticator
         let connector = HttpsConnectorBuilder::new()
