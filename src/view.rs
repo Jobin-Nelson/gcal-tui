@@ -253,7 +253,7 @@ impl Widget for &App {
             }
 
             // Draw current time line
-            if *day == self.now.date_naive() {
+            if self.is_now_timeline_visible && *day == self.now.date_naive() {
                 let current_mins = (self.now.hour() * 60 + self.now.minute()) as u16;
                 let start_mins = self.scroll_offset;
                 let end_mins = start_mins + self.viewport_mins;

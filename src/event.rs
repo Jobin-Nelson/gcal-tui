@@ -47,6 +47,9 @@ pub enum AppEvent {
     FetchSuccess(EventsFetched),
     FetchFailed(String),
 
+    // Toggle
+    ToggleNowTimeline,
+
     // Navigation
     ScrollUp,
     ScrollDown,

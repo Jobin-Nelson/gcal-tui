@@ -63,6 +63,7 @@ pub struct App {
     pub start_date: NaiveDate,
     pub num_days: TimeDelta,
     pub now: DateTime<Local>,
+    pub is_now_timeline_visible: bool,
 
     pub sel_event_id: Option<String>,
     pub cal: Calendar,
@@ -93,6 +94,7 @@ impl App {
             now: Local::now(),
             loaded_start: yesterday,
             loaded_end: yesterday,
+            is_now_timeline_visible: true,
         };
 
         app.fetch_events(
@@ -144,6 +146,11 @@ impl App {
                     // Fetch Events
                     AppEvent::FetchSuccess(events_fetched) => self.update_events(events_fetched),
                     AppEvent::FetchFailed(_) => self.mode = Default::default(),
+
+                    // Toggle
+                    AppEvent::ToggleNowTimeline => {
+                        self.is_now_timeline_visible = !self.is_now_timeline_visible
+                    }
                 },
             }
         }
@@ -170,6 +177,9 @@ impl App {
 
             // Jump to current time
             KeyCode::Char('t') => self.events.send(AppEvent::JumpToNow),
+
+            // Toggle
+            KeyCode::Char('T') => self.events.send(AppEvent::ToggleNowTimeline),
             _ => {}
         }
         Ok(())
