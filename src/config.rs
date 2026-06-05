@@ -1,4 +1,4 @@
-use crate::Result;
+use crate::{Result, logging::get_app_path};
 
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
@@ -11,12 +11,9 @@ pub struct Config {
 
 impl Config {
     pub fn new() -> Result<Config> {
-        let home = std::env::var("HOME").unwrap();
+        let app_paths = get_app_path();
         let settings = config::Config::builder()
-            .add_source(config::File::with_name(&format!(
-                "{}/.config/gcal-tui/config.toml",
-                home
-            )))
+            .add_source(config::File::from(app_paths.config_dir.join("config.toml")))
             .build()
             .unwrap();
         let mut config: Config = settings.try_deserialize()?;

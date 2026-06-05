@@ -11,6 +11,29 @@ pub static DATA_FOLDER: OnceLock<Option<PathBuf>> = OnceLock::new();
 pub static LOG_ENV: OnceLock<String> = OnceLock::new();
 pub static LOG_FILE: OnceLock<String> = OnceLock::new();
 
+#[derive(Debug)]
+pub struct AppPaths {
+    pub config_dir: PathBuf,
+    pub data_dir: PathBuf,
+    pub cache_dir: PathBuf,
+}
+
+pub static APP_PATHS: OnceLock<AppPaths> = OnceLock::new();
+
+pub fn get_app_path() -> &'static AppPaths {
+    let project_name = PROJECT_NAME.get_or_init(|| "gcal-tui".to_string());
+    APP_PATHS.get_or_init(|| {
+        let proj_dirs = ProjectDirs::from("com", "jorg", project_name)
+            .expect("Failed to determine secure system home directories");
+
+        AppPaths {
+            config_dir: proj_dirs.config_dir().to_path_buf(),
+            data_dir: proj_dirs.data_dir().to_path_buf(),
+            cache_dir: proj_dirs.cache_dir().to_path_buf(),
+        }
+    })
+}
+
 fn project_directory(app: Result<String>) -> Option<ProjectDirs> {
     let app = app
         .or_else(|_| Ok::<_, VarError>("gcal-tui".to_string()))
@@ -18,7 +41,7 @@ fn project_directory(app: Result<String>) -> Option<ProjectDirs> {
     ProjectDirs::from("com", "jorg", app.as_ref())
 }
 
-pub fn get_data_dir(project_name: String) -> PathBuf {
+pub fn get_data_dir(project_name: &str) -> PathBuf {
     DATA_FOLDER
         .get_or_init(|| {
             project_directory(std::env::var(format!("{}_DATA", project_name)).map_err(Error::Env))
@@ -30,10 +53,10 @@ pub fn get_data_dir(project_name: String) -> PathBuf {
 }
 
 pub fn initialize_logging() -> Result<()> {
-    let project_name = PROJECT_NAME.get_or_init(|| "GCAL_TUI".to_string());
+    let project_name = PROJECT_NAME.get_or_init(|| "gcal-tui".to_string());
     let log_file = LOG_FILE.get_or_init(|| "gcal-tui.log".to_string());
     let log_env = LOG_ENV.get_or_init(|| format!("{}_LOGLEVEL", project_name.clone()));
-    let directory = get_data_dir(project_name.clone());
+    let directory = get_data_dir(project_name);
     std::fs::create_dir_all(directory.clone())?;
     let log_path = directory.join(log_file.clone());
     let log_file = std::fs::File::create(log_path)?;
