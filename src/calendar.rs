@@ -2,7 +2,7 @@ use chrono::{Local, NaiveDate};
 use futures::stream::{self, StreamExt, TryStreamExt};
 use google_calendar3::{
     CalendarHub,
-    api::Event,
+    api::{Event, EventDateTime},
     hyper_rustls::{HttpsConnector, HttpsConnectorBuilder},
     hyper_util::{
         self,
@@ -13,7 +13,7 @@ use google_calendar3::{
     },
 };
 
-use crate::{Config, Result};
+use crate::{Config, Result, app::EventNode};
 
 type Hub = CalendarHub<HttpsConnector<HttpConnector>>;
 
@@ -106,5 +106,32 @@ impl Calendar {
         .buffer_unordered(5)
         .try_concat()
         .await
+    }
+
+    pub async fn create_event(&self, event_node: EventNode) -> Result<Event> {
+        let start = EventDateTime {
+            date_time: Some(event_node.start_time),
+            ..Default::default()
+        };
+        let end = EventDateTime {
+            date_time: Some(event_node.end_time),
+            ..Default::default()
+        };
+
+        let new_event = Event {
+            summary: Some(event_node.summary),
+            start: Some(start),
+            end: Some(end),
+            ..Default::default()
+        };
+
+        let (_, created_event) = self
+            .hub
+            .events()
+            .insert(new_event, "primary")
+            .doit()
+            .await?;
+
+        Ok(created_event)
     }
 }
