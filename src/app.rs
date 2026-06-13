@@ -49,6 +49,7 @@ pub enum AppMode {
     #[default]
     Normal,
     Fetching,
+    Insert,
 }
 
 pub struct App {
@@ -57,18 +58,25 @@ pub struct App {
 
     pub mode: AppMode,
 
+    // View events
+    pub start_date: NaiveDate,
     pub scroll_offset: u16,
     pub viewport_mins: u16,
     pub cal_event_nodes: Vec<EventNode>,
-    pub start_date: NaiveDate,
     pub num_days: TimeDelta,
     pub now: DateTime<Local>,
     pub is_now_timeline_visible: bool,
 
     pub sel_event_id: Option<String>,
+
+    // Load events
     pub cal: Calendar,
     pub loaded_start: NaiveDate,
     pub loaded_end: NaiveDate,
+
+    // Insert event
+    pub insert_event_time: DateTime<Local>,
+    pub insert_event_duration: TimeDelta,
 }
 
 impl App {
@@ -95,6 +103,8 @@ impl App {
             loaded_start: yesterday,
             loaded_end: yesterday,
             is_now_timeline_visible: true,
+            insert_event_time: None,
+            insert_event_duration: TimeDelta::minutes(RESOLUTION_IN_MINS as i64),
         };
 
         app.fetch_events(
@@ -144,7 +154,7 @@ impl App {
                     AppEvent::JumpToNow => self.jump_to_current_time(),
 
                     // Fetch Events
-                    AppEvent::FetchSuccess(events_fetched) => self.update_events(events_fetched),
+                    AppEvent::FetchSuccess(events_fetched) => self.add_events(events_fetched),
                     AppEvent::FetchFailed(_) => self.mode = Default::default(),
 
                     // Toggle
@@ -157,10 +167,30 @@ impl App {
         Ok(())
     }
 
+    /// Handles the tick event of the terminal.
+    ///
+    /// The tick event is where you can update the state of your application with any logic that
+    /// needs to be updated at a fixed frame rate. E.g. polling a server, updating an animation.
+    pub fn tick(&self) {}
+
+    /// Set running to false to quit the application.
+    pub fn quit(&mut self) {
+        self.running = false;
+    }
+
     /// Handles the key events and updates the state of [`App`].
     pub fn handle_key_events(&mut self, key_event: KeyEvent) -> Result<()> {
+        match self.mode {
+            AppMode::Normal => self.handle_normal_key_events(key_event),
+            AppMode::Fetching => self.handle_normal_key_events(key_event),
+            AppMode::Insert => self.handle_insert_key_events(key_event),
+        }
+    }
+
+    /// Handle normal key events
+    pub fn handle_normal_key_events(&mut self, key_event: KeyEvent) -> Result<()> {
         match key_event.code {
-            KeyCode::Esc | KeyCode::Char('q') => self.events.send(AppEvent::Quit),
+            KeyCode::Char('q') => self.events.send(AppEvent::Quit),
             KeyCode::Char('c' | 'C') if key_event.modifiers == KeyModifiers::CONTROL => {
                 self.events.send(AppEvent::Quit)
             }
@@ -185,15 +215,30 @@ impl App {
         Ok(())
     }
 
-    /// Handles the tick event of the terminal.
-    ///
-    /// The tick event is where you can update the state of your application with any logic that
-    /// needs to be updated at a fixed frame rate. E.g. polling a server, updating an animation.
-    pub fn tick(&self) {}
+    /// Handle insert key events
+    pub fn handle_insert_key_events(&mut self, key_event: KeyEvent) -> Result<()> {
+        match key_event.code {
+            KeyCode::Esc => self.mode = AppMode::Normal,
+            KeyCode::Char('c' | 'C') if key_event.modifiers == KeyModifiers::CONTROL => {
+                self.events.send(AppEvent::Quit)
+            }
+            // Other handlers you could add here.
+            // Scroll vertically
+            KeyCode::Char('k') | KeyCode::Up => self.events.send(AppEvent::ScrollUp),
+            KeyCode::Char('J') => self.events.send(AppEvent::ScrollDownBig),
 
-    /// Set running to false to quit the application.
-    pub fn quit(&mut self) {
-        self.running = false;
+            // Scroll horizontally
+            KeyCode::Char('h') => self.events.send(AppEvent::ScrollLeft),
+            KeyCode::Char('l') => self.events.send(AppEvent::ScrollRight),
+
+            // Jump to current time
+            KeyCode::Char('t') => self.events.send(AppEvent::JumpToNow),
+
+            // Toggle
+            KeyCode::Char('T') => self.events.send(AppEvent::ToggleNowTimeline),
+            _ => {}
+        }
+        Ok(())
     }
 
     /// Trigger background fetch for new events
@@ -226,8 +271,8 @@ impl App {
         });
     }
 
-    /// Transforms events to convenient structure
-    fn update_events(&mut self, mut events_fetched: EventsFetched) {
+    /// Add events
+    fn add_events(&mut self, mut events_fetched: EventsFetched) {
         self.cal_event_nodes.append(&mut events_fetched.event_nodes);
         self.cal_event_nodes.sort_by_key(|e| e.start_time);
 

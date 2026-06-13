@@ -11,8 +11,8 @@ use ratatui::{
 };
 
 use crate::{
-    app::{App, EventNode},
-    constants::RESOLUTION_IN_MINS,
+    app::{App, AppMode, EventNode},
+    constants::{RESOLUTION_IN_MINS, START_OFFSET},
 };
 
 #[derive(Debug)]
@@ -207,6 +207,8 @@ impl Widget for &App {
             .block(block.clone())
             .render(columns[0], buf);
 
+        let middle_day = self.start_date + START_OFFSET;
+
         // Draw events
         for (day, day_area) in target_dates.iter().zip(columns.iter().skip(1)) {
             block.clone().render(*day_area, buf);
@@ -250,6 +252,11 @@ impl Widget for &App {
                     .style(Style::default().bg(bg_color).fg(text_color))
                     .wrap(Wrap { trim: true })
                     .render(re.rect, buf);
+            }
+
+            // Draw insert time block
+            if &middle_day == day {
+                let insert_mins = self.insert_event_time.block.clone().render(*day_area, buf);
             }
 
             // Draw current time line
