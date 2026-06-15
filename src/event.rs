@@ -46,18 +46,6 @@ pub enum AppEvent {
     // Fetch
     FetchSuccess(EventsFetched),
     FetchFailed(String),
-
-    // Toggle
-    ToggleNowTimeline,
-
-    // Navigation
-    ScrollUp,
-    ScrollDown,
-    ScrollUpBig,
-    ScrollDownBig,
-    ScrollLeft,
-    ScrollRight,
-    JumpToNow,
 }
 
 /// Terminal event handler.

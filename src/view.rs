@@ -11,8 +11,8 @@ use ratatui::{
 };
 
 use crate::{
-    app::{App, AppMode, EventNode},
-    constants::{RESOLUTION_IN_MINS, START_OFFSET},
+    app::{App, AppMode, EventNode, InsertEvent},
+    constants::RESOLUTION_IN_MINS,
 };
 
 #[derive(Debug)]
@@ -96,7 +96,7 @@ fn calculate_viewport_rect<'a, 'b>(
 
     for cluster in clusters {
         let mut column_ends: Vec<u16> = Vec::new();
-        let mut placmeents = Vec::new();
+        let mut placements = Vec::new();
 
         for &idx in &cluster {
             let ev = &visible_events[idx];
@@ -114,13 +114,13 @@ fn calculate_viewport_rect<'a, 'b>(
                 column_ends.push(ev.end_row);
                 column_ends.len() - 1
             });
-            placmeents.push((idx, col_idx));
+            placements.push((idx, col_idx));
         }
 
         let total_cols = column_ends.len() as u16;
         let col_width = (column_area.width / total_cols).max(1);
 
-        for (idx, col_idx) in placmeents {
+        for (idx, col_idx) in placements {
             let ev = &visible_events[idx];
 
             let rect = Rect {
@@ -140,6 +140,34 @@ fn calculate_viewport_rect<'a, 'b>(
     results
 }
 
+fn insert_event_to_rect(
+    insert_event: &InsertEvent,
+    viewport_start: DateTime<Utc>,
+    viewport_end: DateTime<Utc>,
+    column_area: &Rect,
+) -> Rect {
+    let end_time = insert_event.start_time + insert_event.duration;
+
+    // TODO: Is clamped time really needed?
+    let clamped_start = insert_event.start_time.max(viewport_start);
+    let clamped_end = end_time.min(viewport_end);
+
+    // Calculate total minutes from top of the screen
+    let start_mins = (clamped_start - viewport_start).num_minutes();
+    let end_mins = (clamped_end - viewport_start).num_minutes();
+
+    // Convert minutes to terminal rows
+    let start_row = start_mins as u16 / RESOLUTION_IN_MINS;
+    let end_row = end_mins as u16 / RESOLUTION_IN_MINS;
+
+    Rect {
+        x: column_area.x,
+        y: column_area.y + start_row,
+        width: column_area.width,
+        height: end_row.saturating_sub(start_row),
+    }
+}
+
 impl Widget for &App {
     fn render(self, area: Rect, buf: &mut Buffer) {
         let header_layout = Layout::vertical([Constraint::Length(3), Constraint::Fill(1)])
@@ -155,6 +183,7 @@ impl Widget for &App {
         let header_columns: [Rect; 4] = header.layout(&horizontal_layout);
         let columns: [Rect; 4] = calendar.layout(&horizontal_layout);
 
+        // Blocks
         let block = Block::bordered().merge_borders(MergeStrategy::Exact);
 
         // headers
@@ -207,8 +236,6 @@ impl Widget for &App {
             .block(block.clone())
             .render(columns[0], buf);
 
-        let middle_day = self.start_date + START_OFFSET;
-
         // Draw events
         for (day, day_area) in target_dates.iter().zip(columns.iter().skip(1)) {
             block.clone().render(*day_area, buf);
@@ -254,11 +281,6 @@ impl Widget for &App {
                     .render(re.rect, buf);
             }
 
-            // Draw insert time block
-            if &middle_day == day {
-                let insert_mins = self.insert_event_time.block.clone().render(*day_area, buf);
-            }
-
             // Draw current time line
             if self.is_now_timeline_visible && *day == self.now.date_naive() {
                 let current_mins = (self.now.hour() * 60 + self.now.minute()) as u16;
@@ -282,6 +304,27 @@ impl Widget for &App {
                     Paragraph::new(line_str)
                         .style(Style::default().fg(Color::Red))
                         .render(timeline_rect, buf);
+                }
+            }
+
+            // Draw insert time block
+            if self.mode == AppMode::Insert {
+                let insert_local_date = self
+                    .insert_event
+                    .start_time
+                    .with_timezone(&Local)
+                    .date_naive();
+                if day == &insert_local_date {
+                    let insert_rect = insert_event_to_rect(
+                        &self.insert_event,
+                        viewport_start,
+                        viewport_end,
+                        &inner_area,
+                    );
+                    Block::bordered()
+                        .border_type(ratatui::widgets::BorderType::Rounded)
+                        .border_style(Style::default().add_modifier(Modifier::BOLD))
+                        .render(insert_rect, buf);
                 }
             }
         }
