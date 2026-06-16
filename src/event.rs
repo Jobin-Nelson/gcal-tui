@@ -46,6 +46,8 @@ pub enum AppEvent {
     // Fetch
     FetchSuccess(EventsFetched),
     FetchFailed(String),
+    EventCreated(EventNode),
+    ReloadSuccess(EventsFetched),
 }
 
 /// Terminal event handler.

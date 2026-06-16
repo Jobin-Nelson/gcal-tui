@@ -1,16 +1,19 @@
 use crate::constants::{
     BUFFER_DAYS, FETCH_DAYS, MINUTES_IN_DAY, NUM_DAYS, RESOLUTION_IN_MINS, ROWS_PER_HOUR,
-    SCROLL_OFFSET_MINS, START_OFFSET, VIEWPORT_MINS,
+    SCROLL_OFFSET_MINS, START_OFFSET, TIME_FORMAT, VIEWPORT_MINS,
 };
 use crate::event::{AppEvent, Event, EventHandler, EventsFetched};
 use crate::{Calendar, Config, Result};
 
-use chrono::{DateTime, Local, NaiveDate, TimeDelta, Timelike, Utc};
+use chrono::{DateTime, Local, NaiveDate, NaiveDateTime, TimeDelta, TimeZone, Timelike, Utc};
 use google_calendar3::api::Event as CEvent;
+use ratatui::style::{Color, Modifier, Style};
+use ratatui::widgets::Block;
 use ratatui::{
     DefaultTerminal,
     crossterm::event::{Event as CrosstermEvent, KeyCode, KeyEvent, KeyEventKind, KeyModifiers},
 };
+use ratatui_textarea::TextArea;
 
 #[derive(Debug, Clone)]
 pub struct EventNode {
@@ -50,6 +53,23 @@ pub enum AppMode {
     Normal,
     Fetching,
     Insert,
+    InsertTyping,
+}
+
+#[derive(Debug, Default, PartialEq, Eq)]
+pub enum ActiveField {
+    #[default]
+    Summary,
+    StartTime,
+    EndTime,
+}
+
+#[derive(Debug, Default)]
+pub struct EventPopup<'a> {
+    pub summary: TextArea<'a>,
+    pub start_time: TextArea<'a>,
+    pub end_time: TextArea<'a>,
+    pub active_field: ActiveField,
 }
 
 #[derive(Debug)]
@@ -82,6 +102,7 @@ pub struct App {
 
     // Insert event
     pub insert_event: InsertEvent,
+    pub popup: EventPopup<'static>,
 }
 
 impl App {
@@ -94,8 +115,18 @@ impl App {
         let now = Local::now();
         let start_date = now.date_naive() - START_OFFSET;
 
+        let rounded_minute = (now.minute() / RESOLUTION_IN_MINS as u32) * RESOLUTION_IN_MINS as u32;
+        let rounded_time = now
+            .with_minute(rounded_minute)
+            .unwrap()
+            .with_second(0)
+            .unwrap()
+            .with_nanosecond(0)
+            .unwrap()
+            .with_timezone(&Utc);
+
         let insert_event = InsertEvent {
-            start_time: now.with_timezone(&Utc),
+            start_time: rounded_time,
             duration: TimeDelta::minutes(RESOLUTION_IN_MINS as i64 * 2),
         };
 
@@ -115,12 +146,15 @@ impl App {
             loaded_end: start_date,
             is_now_timeline_visible: true,
             insert_event,
+            popup: Default::default(),
         };
 
         app.fetch_events(
             start_date - BUFFER_DAYS,
             start_date + app.num_days + BUFFER_DAYS,
+            true,
         );
+        app.switch_active_field(Default::default());
 
         Ok(app)
     }
@@ -149,10 +183,10 @@ impl App {
                 },
                 Event::App(app_event) => match app_event {
                     AppEvent::Quit => self.quit(),
-
-                    // Fetch Events
                     AppEvent::FetchSuccess(events_fetched) => self.add_events(events_fetched),
                     AppEvent::FetchFailed(_) => self.mode = Default::default(),
+                    AppEvent::EventCreated(event_node) => self.add_event(event_node),
+                    AppEvent::ReloadSuccess(events_fetched) => self.update_events(events_fetched),
                 },
             }
         }
@@ -176,6 +210,7 @@ impl App {
             AppMode::Normal => self.handle_normal_key_events(key_event),
             AppMode::Fetching => self.handle_normal_key_events(key_event),
             AppMode::Insert => self.handle_insert_key_events(key_event),
+            AppMode::InsertTyping => self.handle_inserttyping_key_events(key_event),
         }
     }
 
@@ -227,6 +262,15 @@ impl App {
             KeyCode::Char('h') | KeyCode::Left => self.move_insert_left(),
             KeyCode::Char('l') | KeyCode::Right => self.move_insert_right(),
 
+            // Extend
+            KeyCode::Char('K') => self.extend_insert_up(),
+            KeyCode::Char('J') => self.extend_insert_down(),
+            KeyCode::Char('H') => self.extend_insert_left(),
+            KeyCode::Char('L') => self.extend_insert_right(),
+
+            // Insert event details
+            KeyCode::Enter => self.enter_insert_event_details(),
+
             // Jump to current time
             KeyCode::Char('t') => self.move_insert_current_time(),
 
@@ -237,8 +281,41 @@ impl App {
         Ok(())
     }
 
+    /// Handle inserttyping key events
+    pub fn handle_inserttyping_key_events(&mut self, key_event: KeyEvent) -> Result<()> {
+        match key_event.code {
+            KeyCode::Esc => self.mode = AppMode::Insert,
+            KeyCode::Tab => {
+                let active_field = match self.popup.active_field {
+                    ActiveField::Summary => ActiveField::StartTime,
+                    ActiveField::StartTime => ActiveField::EndTime,
+                    ActiveField::EndTime => ActiveField::Summary,
+                };
+                self.switch_active_field(active_field);
+            }
+            KeyCode::BackTab => {
+                let active_field = match self.popup.active_field {
+                    ActiveField::Summary => ActiveField::EndTime,
+                    ActiveField::StartTime => ActiveField::Summary,
+                    ActiveField::EndTime => ActiveField::StartTime,
+                };
+                self.switch_active_field(active_field);
+            }
+            KeyCode::Enter => self.submit_popup()?,
+            _ => {
+                let active_ta = match self.popup.active_field {
+                    ActiveField::Summary => &mut self.popup.summary,
+                    ActiveField::StartTime => &mut self.popup.start_time,
+                    ActiveField::EndTime => &mut self.popup.end_time,
+                };
+                active_ta.input(key_event);
+            }
+        }
+        Ok(())
+    }
+
     /// Trigger background fetch for new events
-    pub fn fetch_events(&mut self, start_date: NaiveDate, end_date: NaiveDate) {
+    pub fn fetch_events(&mut self, start_date: NaiveDate, end_date: NaiveDate, is_refresh: bool) {
         if let AppMode::Fetching = self.mode {
             return;
         }
@@ -254,11 +331,45 @@ impl App {
                         .into_iter()
                         .filter_map(|e| e.try_into().ok())
                         .collect();
-                    let _ = sender.send(Event::App(AppEvent::FetchSuccess(EventsFetched {
+                    let events_fetched = EventsFetched {
                         event_nodes,
                         start_date,
                         end_date,
-                    })));
+                    };
+                    let app_event = if is_refresh {
+                        AppEvent::ReloadSuccess(events_fetched)
+                    } else {
+                        AppEvent::FetchSuccess(events_fetched)
+                    };
+                    let _ = sender.send(Event::App(app_event));
+                }
+                Err(e) => {
+                    let _ = sender.send(Event::App(AppEvent::FetchFailed(e.to_string())));
+                }
+            }
+        });
+    }
+
+    /// Trigger background request for creating event
+    pub fn create_event(&mut self, event_node: EventNode) {
+        if let AppMode::Fetching = self.mode {
+            return;
+        }
+        self.mode = AppMode::Fetching;
+
+        let cal_clone = self.cal.clone();
+        let sender = self.events.sender.clone();
+
+        tokio::spawn(async move {
+            match cal_clone.create_event(event_node).await {
+                Ok(event) => {
+                    let Ok(event_node) = EventNode::try_from(event) else {
+                        let _ = sender.send(Event::App(AppEvent::FetchFailed(
+                            "Failed to convert to eventnode".to_string(),
+                        )));
+                        return;
+                    };
+                    let _ = sender.send(Event::App(AppEvent::EventCreated(event_node)));
                 }
                 Err(e) => {
                     let _ = sender.send(Event::App(AppEvent::FetchFailed(e.to_string())));
@@ -277,6 +388,29 @@ impl App {
 
         self.mode = Default::default();
     }
+    fn add_event(&mut self, event_node: EventNode) {
+        let start_date = event_node.start_time.date_naive();
+        let end_date = event_node.end_time.date_naive();
+        if self.loaded_start <= start_date && self.loaded_end >= end_date {
+            let events_fetched = EventsFetched {
+                event_nodes: vec![event_node],
+                start_date,
+                end_date,
+            };
+            self.add_events(events_fetched);
+        }
+    }
+
+    /// Update events
+    fn update_events(&mut self, events_fetched: EventsFetched) {
+        self.cal_event_nodes = events_fetched.event_nodes;
+        self.cal_event_nodes.sort_by_key(|e| e.start_time);
+
+        self.loaded_start = events_fetched.start_date;
+        self.loaded_end = events_fetched.end_date;
+
+        self.mode = Default::default();
+    }
 
     /// Scroll vertically
     fn scroll_up(&mut self) {
@@ -292,14 +426,6 @@ impl App {
     fn big_scroll_down(&mut self) {
         (0..ROWS_PER_HOUR).for_each(|_| self.scroll_down());
     }
-    fn move_insert_up(&mut self) {
-        self.insert_event.start_time -= TimeDelta::minutes(RESOLUTION_IN_MINS as i64);
-        self.sync_viewport_to_cursor();
-    }
-    fn move_insert_down(&mut self) {
-        self.insert_event.start_time += TimeDelta::minutes(RESOLUTION_IN_MINS as i64);
-        self.sync_viewport_to_cursor();
-    }
 
     /// Scroll horizontally
     fn scroll_left(&mut self) {
@@ -310,6 +436,16 @@ impl App {
         self.start_date += TimeDelta::days(1);
         self.check_pagination();
     }
+
+    /// Move Insert Event
+    fn move_insert_up(&mut self) {
+        self.insert_event.start_time -= TimeDelta::minutes(RESOLUTION_IN_MINS as i64);
+        self.sync_viewport_to_cursor();
+    }
+    fn move_insert_down(&mut self) {
+        self.insert_event.start_time += TimeDelta::minutes(RESOLUTION_IN_MINS as i64);
+        self.sync_viewport_to_cursor();
+    }
     fn move_insert_left(&mut self) {
         self.insert_event.start_time -= TimeDelta::days(1);
         self.sync_viewport_to_cursor();
@@ -319,6 +455,62 @@ impl App {
         self.sync_viewport_to_cursor();
     }
 
+    /// Extend Insert Event
+    fn extend_insert_up(&mut self) {
+        let delta = TimeDelta::minutes(RESOLUTION_IN_MINS as i64);
+        self.insert_event.start_time -= delta;
+        self.insert_event.duration += delta;
+        self.sync_viewport_to_cursor();
+    }
+    fn extend_insert_down(&mut self) {
+        self.insert_event.duration += TimeDelta::minutes(RESOLUTION_IN_MINS as i64);
+    }
+    fn extend_insert_left(&mut self) {
+        let delta = TimeDelta::days(1);
+        self.insert_event.start_time -= delta;
+        self.insert_event.duration += delta;
+        self.sync_viewport_to_cursor();
+    }
+    fn extend_insert_right(&mut self) {
+        let delta = TimeDelta::days(1);
+        self.insert_event.duration += delta;
+    }
+
+    /// Submit Insert Event
+    fn submit_popup(&mut self) -> Result<()> {
+        let start_text = self.popup.start_time.lines().join("");
+        let end_text = self.popup.end_time.lines().join("");
+
+        let start_res = NaiveDateTime::parse_from_str(start_text.trim(), TIME_FORMAT);
+        let end_res = NaiveDateTime::parse_from_str(end_text.trim(), TIME_FORMAT);
+
+        if let (Ok(start_naive), Ok(end_naive)) = (start_res, end_res) {
+            let start_time = Local
+                .from_local_datetime(&start_naive)
+                .unwrap()
+                .with_timezone(&Utc);
+            let end_time = Local
+                .from_local_datetime(&end_naive)
+                .unwrap()
+                .with_timezone(&Utc);
+
+            let summary = self.popup.summary.lines().join("\n");
+
+            let event_node = EventNode {
+                id: Default::default(),
+                summary,
+                start_time,
+                end_time,
+            };
+
+            self.create_event(event_node);
+        } else {
+            // Signal a format error
+        }
+
+        Ok(())
+    }
+
     /// Pagination
     fn check_pagination(&mut self) {
         if let AppMode::Fetching = self.mode {
@@ -326,9 +518,9 @@ impl App {
         }
 
         if self.start_date + self.num_days + BUFFER_DAYS >= self.loaded_end {
-            self.fetch_events(self.loaded_end, self.loaded_end + FETCH_DAYS);
+            self.fetch_events(self.loaded_end, self.loaded_end + FETCH_DAYS, false);
         } else if self.start_date - BUFFER_DAYS <= self.loaded_start {
-            self.fetch_events(self.loaded_start - FETCH_DAYS, self.loaded_start);
+            self.fetch_events(self.loaded_start - FETCH_DAYS, self.loaded_start, false);
         }
     }
 
@@ -355,6 +547,24 @@ impl App {
         self.now = now;
         self.jump_to_time(&now);
         self.insert_event.start_time = now.with_timezone(&Utc);
+    }
+
+    /// Insert event details
+    fn enter_insert_event_details(&mut self) {
+        self.mode = AppMode::InsertTyping;
+
+        let local_start = self.insert_event.start_time.with_timezone(&Local);
+        let local_end =
+            (self.insert_event.start_time + self.insert_event.duration).with_timezone(&Local);
+
+        let start_str = local_start.format(TIME_FORMAT).to_string();
+        let end_str = local_end.format(TIME_FORMAT).to_string();
+
+        // modify the textarea instead of creating new ones to preserve styles
+        self.popup.start_time.select_all();
+        self.popup.end_time.select_all();
+        self.popup.start_time.insert_str(start_str);
+        self.popup.end_time.insert_str(end_str);
     }
 
     /// Resize viewport
@@ -401,4 +611,43 @@ impl App {
             self.scroll_offset = (self.scroll_offset + overflow).min(max_offset);
         }
     }
+
+    fn switch_active_field(&mut self, field: ActiveField) {
+        self.popup.active_field = field;
+
+        configure_insert_ta(
+            &mut self.popup.summary,
+            " Summary ",
+            self.popup.active_field == ActiveField::Summary,
+        );
+        configure_insert_ta(
+            &mut self.popup.start_time,
+            " Start Time ",
+            self.popup.active_field == ActiveField::StartTime,
+        );
+        configure_insert_ta(
+            &mut self.popup.end_time,
+            " End Time ",
+            self.popup.active_field == ActiveField::EndTime,
+        );
+    }
+}
+
+fn configure_insert_ta<'a>(ta: &mut TextArea<'a>, title: &'a str, is_active: bool) {
+    let mut block = Block::bordered().title(title);
+
+    if is_active {
+        block = block.border_style(
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        );
+        ta.set_cursor_line_style(Style::default());
+        ta.set_cursor_style(Style::default().add_modifier(Modifier::REVERSED));
+    } else {
+        block = block.border_style(Style::default().fg(Color::DarkGray));
+        ta.set_cursor_style(Style::default());
+    };
+
+    ta.set_block(block);
 }

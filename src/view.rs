@@ -7,7 +7,7 @@ use ratatui::{
     style::{Color, Modifier, Style},
     symbols::merge::MergeStrategy,
     text::Line,
-    widgets::{Block, Borders, Paragraph, Widget, Wrap},
+    widgets::{Block, Borders, Clear, Paragraph, Widget, Wrap},
 };
 
 use crate::{
@@ -41,7 +41,6 @@ fn calculate_viewport_rect<'a, 'b>(
                 return None;
             }
 
-            // TODO: Is clamped time really needed?
             let clamped_start = ev.start_time.max(viewport_start);
             let clamped_end = ev.end_time.min(viewport_end);
 
@@ -148,7 +147,6 @@ fn insert_event_to_rect(
 ) -> Rect {
     let end_time = insert_event.start_time + insert_event.duration;
 
-    // TODO: Is clamped time really needed?
     let clamped_start = insert_event.start_time.max(viewport_start);
     let clamped_end = end_time.min(viewport_end);
 
@@ -327,6 +325,30 @@ impl Widget for &App {
                         .render(insert_rect, buf);
                 }
             }
+        }
+
+        // Draw Popup
+        if self.mode == AppMode::InsertTyping {
+            let popup_area = area.centered(Constraint::Max(35), Constraint::Length((3 * 3) + 2));
+
+            Clear.render(popup_area, buf);
+
+            Block::bordered()
+                .title(" Create Event ")
+                .border_style(Style::default().fg(Color::Cyan))
+                .render(popup_area, buf);
+
+            let popup_inner_area = popup_area.inner(Margin {
+                horizontal: 1,
+                vertical: 1,
+            });
+
+            let [summary_area, start_time_area, end_time_area] =
+                popup_inner_area.layout(&Layout::vertical([Constraint::Length(3); 3]));
+
+            self.popup.summary.render(summary_area, buf);
+            self.popup.start_time.render(start_time_area, buf);
+            self.popup.end_time.render(end_time_area, buf);
         }
     }
 }

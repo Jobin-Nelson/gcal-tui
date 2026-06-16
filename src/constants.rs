@@ -11,3 +11,4 @@ pub const NUM_DAYS: TimeDelta = TimeDelta::days(3);
 pub const BUFFER_DAYS: TimeDelta = TimeDelta::days(3);
 pub const FETCH_DAYS: TimeDelta = TimeDelta::days(7);
 pub const START_OFFSET: TimeDelta = TimeDelta::days(1);
+pub const TIME_FORMAT: &str = "%Y-%m-%d %H:%M";

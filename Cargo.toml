@@ -13,6 +13,7 @@ dotenvy = "0.15.7"
 futures = "0.3.32"
 google-calendar3 = "7.0.0"
 ratatui = { version = "0.30.0", features = ["crossterm_0_29"] }
+ratatui-textarea = "0.9.2"
 serde = "1.0.228"
 serde_json = "1.0.150"
 shellexpand = "3.1.2"
