@@ -55,7 +55,8 @@ pub enum AppMode {
     Normal,
     Fetching,
     Insert,
-    InsertTyping,
+    InsertEdit,
+    Visual,
 }
 
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -214,7 +215,8 @@ impl App {
             AppMode::Normal => self.handle_normal_key_events(key_event),
             AppMode::Fetching => self.handle_normal_key_events(key_event),
             AppMode::Insert => self.handle_insert_key_events(key_event),
-            AppMode::InsertTyping => self.handle_inserttyping_key_events(key_event),
+            AppMode::InsertEdit => self.handle_insertedit_key_events(key_event),
+            AppMode::Visual => self.handle_visual_key_events(key_event),
         }
     }
 
@@ -244,6 +246,12 @@ impl App {
 
             // Change mode
             KeyCode::Char('i') => self.mode = AppMode::Insert,
+            KeyCode::Char('v') => {
+                self.mode = AppMode::Visual;
+                if self.sel_event_id.is_none() {
+                    self.select_first_visible_event();
+                }
+            }
             _ => {}
         }
         Ok(())
@@ -285,8 +293,8 @@ impl App {
         Ok(())
     }
 
-    /// Handle inserttyping key events
-    pub fn handle_inserttyping_key_events(&mut self, key_event: KeyEvent) -> Result<()> {
+    /// Handle insertedit key events
+    pub fn handle_insertedit_key_events(&mut self, key_event: KeyEvent) -> Result<()> {
         match key_event.code {
             KeyCode::Esc => self.mode = AppMode::Insert,
             KeyCode::Tab => {
@@ -323,6 +331,36 @@ impl App {
                 };
                 active_ta.input(key_event);
             }
+        }
+        Ok(())
+    }
+
+    /// Handle visual key events
+    pub fn handle_visual_key_events(&mut self, key_event: KeyEvent) -> Result<()> {
+        match key_event.code {
+            KeyCode::Esc | KeyCode::Char('v') => {
+                self.mode = AppMode::Normal;
+                self.sel_event_id = None;
+            }
+            KeyCode::Char('q') => self.events.send(AppEvent::Quit),
+            KeyCode::Char('c' | 'C') if key_event.modifiers == KeyModifiers::CONTROL => {
+                self.events.send(AppEvent::Quit)
+            }
+            // Other handlers you could add here.
+            // move through events chronologically
+            KeyCode::Char('k') | KeyCode::Up => self.select_prev_event(),
+            KeyCode::Char('j') | KeyCode::Down => self.select_next_event(),
+
+            // jump days
+            KeyCode::Char('h') | KeyCode::Left => self.select_prev_day_event(),
+            KeyCode::Char('l') | KeyCode::Right => self.select_next_day_event(),
+
+            // Open the selected event details
+            KeyCode::Enter => {}
+
+            // Toggle
+            KeyCode::Char('T') => self.is_now_timeline_visible = !self.is_now_timeline_visible,
+            _ => {}
         }
         Ok(())
     }
@@ -495,6 +533,78 @@ impl App {
         self.insert_event.duration += delta;
     }
 
+    /// Select Visual Events
+    fn get_selected_index(&self) -> Option<usize> {
+        if let Some(id) = &self.sel_event_id {
+            self.cal_event_nodes.iter().position(|e| e.id == *id)
+        } else {
+            None
+        }
+    }
+    fn select_next_event(&mut self) {
+        if self.cal_event_nodes.is_empty() {
+            return;
+        }
+
+        let next_idx = match self.get_selected_index() {
+            Some(idx) => (idx + 1).min(self.cal_event_nodes.len() - 1),
+            None => 0,
+        };
+
+        self.sel_event_id = self.cal_event_nodes.get(next_idx).map(|e| e.id.clone());
+        self.sync_viewport_to_selected_event();
+    }
+    fn select_prev_event(&mut self) {
+        if self.cal_event_nodes.is_empty() {
+            return;
+        }
+        let prev_idx = match self.get_selected_index() {
+            Some(idx) => idx.saturating_sub(1),
+            None => 0,
+        };
+
+        self.sel_event_id = self.cal_event_nodes.get(prev_idx).map(|e| e.id.clone());
+        self.sync_viewport_to_selected_event();
+    }
+    fn select_next_day_event(&mut self) {
+        if self.cal_event_nodes.is_empty() {
+            return;
+        }
+
+        let current_idx = self.get_selected_index().unwrap_or(0);
+        let current_date = self.cal_event_nodes[current_idx]
+            .start_time
+            .with_timezone(&Local)
+            .date_naive();
+        let target_idx = self
+            .cal_event_nodes
+            .iter()
+            .position(|e| e.start_time.with_timezone(&Local).date_naive() > current_date)
+            .unwrap_or(self.cal_event_nodes.len() - 1);
+
+        self.sel_event_id = self.cal_event_nodes.get(target_idx).map(|e| e.id.clone());
+        self.sync_viewport_to_selected_event();
+    }
+    fn select_prev_day_event(&mut self) {
+        if self.cal_event_nodes.is_empty() {
+            return;
+        }
+
+        let current_idx = self.get_selected_index().unwrap_or(0);
+        let current_date = self.cal_event_nodes[current_idx]
+            .start_time
+            .with_timezone(&Local)
+            .date_naive();
+        let target_idx = self
+            .cal_event_nodes
+            .iter()
+            .rposition(|e| e.start_time.with_timezone(&Local).date_naive() < current_date)
+            .unwrap_or(0);
+
+        self.sel_event_id = self.cal_event_nodes.get(target_idx).map(|e| e.id.clone());
+        self.sync_viewport_to_selected_event();
+    }
+
     /// Submit Insert Event
     fn submit_popup(&mut self) -> Result<()> {
         let start_text = self.popup.start_time.lines().join("");
@@ -585,7 +695,7 @@ impl App {
 
     /// Insert event details
     fn enter_insert_event_details(&mut self) {
-        self.mode = AppMode::InsertTyping;
+        self.mode = AppMode::InsertEdit;
 
         let local_start = self.insert_event.start_time.with_timezone(&Local);
         let local_end =
@@ -595,6 +705,9 @@ impl App {
         let end_str = local_end.format(TIME_FORMAT).to_string();
 
         // modify the textarea instead of creating new ones to preserve styles
+        self.popup.summary.clear();
+        self.popup.description.clear();
+
         self.popup.start_time.select_all();
         self.popup.end_time.select_all();
         self.popup.start_time.insert_str(start_str);
@@ -633,20 +746,84 @@ impl App {
         }
 
         // 2. Vertical sync
-        let cursor_mins = (cursor_start_local.hour() * 60 + cursor_start_local.minute()) as u16;
+        let cursor_start_mins =
+            (cursor_start_local.hour() * 60 + cursor_start_local.minute()) as u16;
+        let cursor_end_mins = cursor_start_mins + self.insert_event.duration.num_minutes() as u16;
         let viewport_top = self.scroll_offset;
         let viewport_bottom = self.scroll_offset + self.viewport_mins;
-        let duration_mins = self.insert_event.duration.num_minutes() as u16;
 
         // scroll up if the top edge goes above the screen
-        if cursor_mins < viewport_top {
-            self.scroll_offset = cursor_mins;
+        if cursor_start_mins < viewport_top {
+            self.scroll_offset = cursor_start_mins;
         // scroll down if the bottom edge goves below the screen
-        } else if cursor_mins + duration_mins >= viewport_bottom {
-            let overflow = (cursor_mins + duration_mins) - viewport_bottom;
+        } else if cursor_end_mins >= viewport_bottom {
+            let overflow = cursor_end_mins - viewport_bottom;
             let max_offset = MINUTES_IN_DAY.saturating_sub(self.viewport_mins);
             self.scroll_offset = (self.scroll_offset + overflow).min(max_offset);
         }
+    }
+
+    fn sync_viewport_to_selected_event(&mut self) {
+        let Some(idx) = self.get_selected_index() else {
+            return;
+        };
+
+        let event_node = &self.cal_event_nodes[idx];
+        let start_local = event_node.start_time.with_timezone(&Local);
+        let end_local = event_node.end_time.with_timezone(&Local);
+
+        let event_start_date = start_local.date_naive();
+        let event_end_date = end_local.date_naive();
+
+        // 1. Horizontal sync
+        if event_start_date < self.start_date {
+            self.start_date = event_start_date;
+            self.check_pagination();
+        } else if event_end_date >= self.start_date + self.num_days {
+            self.start_date = event_start_date - self.num_days + TimeDelta::days(1);
+            self.check_pagination();
+        }
+
+        // 3. Vertical sync
+        let start_mins = (start_local.hour() * 60 + start_local.minute()) as u16;
+        let end_mins = (end_local.hour() * 60 + end_local.minute()) as u16;
+
+        let viewport_top = self.scroll_offset;
+        let viewport_bottom = self.scroll_offset + self.viewport_mins;
+
+        if start_mins < viewport_top {
+            self.scroll_offset = start_mins;
+        } else if end_mins > viewport_bottom {
+            let overflow = end_mins.saturating_sub(viewport_bottom);
+            let max_offset = MINUTES_IN_DAY.saturating_sub(self.viewport_mins);
+            self.scroll_offset = (self.scroll_offset + overflow).min(max_offset);
+        }
+    }
+
+    fn select_first_visible_event(&mut self) {
+        if self.cal_event_nodes.is_empty() {
+            self.sel_event_id = None;
+            return;
+        };
+        let start_of_day = self.start_date.and_hms_opt(0, 0, 0).unwrap();
+        let start_of_day_local = Local.from_local_datetime(&start_of_day).unwrap();
+
+        // convert the current viewport top into UTC timestamp
+        let viewport_start_utc = (start_of_day_local
+            + TimeDelta::minutes(self.scroll_offset as i64))
+        .with_timezone(&Utc);
+
+        // Find the first event whose end time extends past the top of viewport
+        let first_visible_idx = self
+            .cal_event_nodes
+            .iter()
+            .position(|e| e.end_time > viewport_start_utc)
+            .unwrap_or(0);
+
+        self.sel_event_id = self
+            .cal_event_nodes
+            .get(first_visible_idx)
+            .map(|e| e.id.clone());
     }
 
     fn switch_active_field(&mut self, field: ActiveField) {
