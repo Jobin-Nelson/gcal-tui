@@ -120,6 +120,7 @@ impl Calendar {
 
         let new_event = Event {
             summary: Some(event_node.summary),
+            description: event_node.description,
             start: Some(start),
             end: Some(end),
             ..Default::default()

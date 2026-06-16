@@ -44,10 +44,10 @@ pub enum AppEvent {
     Quit,
 
     // Fetch
+    ReloadSuccess(EventsFetched),
     FetchSuccess(EventsFetched),
     FetchFailed(String),
     EventCreated(EventNode),
-    ReloadSuccess(EventsFetched),
 }
 
 /// Terminal event handler.

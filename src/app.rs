@@ -19,6 +19,7 @@ use ratatui_textarea::TextArea;
 pub struct EventNode {
     pub id: String,
     pub summary: String,
+    pub description: Option<String>,
     pub start_time: DateTime<Utc>,
     pub end_time: DateTime<Utc>,
 }
@@ -41,6 +42,7 @@ impl TryFrom<CEvent> for EventNode {
         Ok(EventNode {
             id: cal_event.id.unwrap(),
             summary,
+            description: cal_event.description,
             start_time: event_start_datetime,
             end_time: event_end_datetime,
         })
@@ -60,6 +62,7 @@ pub enum AppMode {
 pub enum ActiveField {
     #[default]
     Summary,
+    Description,
     StartTime,
     EndTime,
 }
@@ -67,6 +70,7 @@ pub enum ActiveField {
 #[derive(Debug, Default)]
 pub struct EventPopup<'a> {
     pub summary: TextArea<'a>,
+    pub description: TextArea<'a>,
     pub start_time: TextArea<'a>,
     pub end_time: TextArea<'a>,
     pub active_field: ActiveField,
@@ -287,7 +291,8 @@ impl App {
             KeyCode::Esc => self.mode = AppMode::Insert,
             KeyCode::Tab => {
                 let active_field = match self.popup.active_field {
-                    ActiveField::Summary => ActiveField::StartTime,
+                    ActiveField::Summary => ActiveField::Description,
+                    ActiveField::Description => ActiveField::StartTime,
                     ActiveField::StartTime => ActiveField::EndTime,
                     ActiveField::EndTime => ActiveField::Summary,
                 };
@@ -296,7 +301,8 @@ impl App {
             KeyCode::BackTab => {
                 let active_field = match self.popup.active_field {
                     ActiveField::Summary => ActiveField::EndTime,
-                    ActiveField::StartTime => ActiveField::Summary,
+                    ActiveField::Description => ActiveField::Summary,
+                    ActiveField::StartTime => ActiveField::Description,
                     ActiveField::EndTime => ActiveField::StartTime,
                 };
                 self.switch_active_field(active_field);
@@ -305,6 +311,7 @@ impl App {
             _ => {
                 let active_ta = match self.popup.active_field {
                     ActiveField::Summary => &mut self.popup.summary,
+                    ActiveField::Description => &mut self.popup.description,
                     ActiveField::StartTime => &mut self.popup.start_time,
                     ActiveField::EndTime => &mut self.popup.end_time,
                 };
@@ -484,29 +491,44 @@ impl App {
         let start_res = NaiveDateTime::parse_from_str(start_text.trim(), TIME_FORMAT);
         let end_res = NaiveDateTime::parse_from_str(end_text.trim(), TIME_FORMAT);
 
-        if let (Ok(start_naive), Ok(end_naive)) = (start_res, end_res) {
-            let start_time = Local
-                .from_local_datetime(&start_naive)
-                .unwrap()
-                .with_timezone(&Utc);
-            let end_time = Local
-                .from_local_datetime(&end_naive)
-                .unwrap()
-                .with_timezone(&Utc);
+        let (Ok(start_naive), Ok(end_naive)) = (start_res, end_res) else {
+            // TODO: Signal a format error
+            return Ok(());
+        };
 
-            let summary = self.popup.summary.lines().join("\n");
+        let start_time = Local
+            .from_local_datetime(&start_naive)
+            .unwrap()
+            .with_timezone(&Utc);
+        let end_time = Local
+            .from_local_datetime(&end_naive)
+            .unwrap()
+            .with_timezone(&Utc);
 
-            let event_node = EventNode {
-                id: Default::default(),
-                summary,
-                start_time,
-                end_time,
-            };
-
-            self.create_event(event_node);
-        } else {
-            // Signal a format error
+        let summary = self.popup.summary.lines().join("\n");
+        if summary.trim().is_empty() {
+            // TODO: Signal summary cannot be empty
+            return Ok(());
         }
+
+        let description = {
+            let description = self.popup.description.lines().join("\n");
+            if description.trim().is_empty() {
+                None
+            } else {
+                Some(description)
+            }
+        };
+
+        let event_node = EventNode {
+            id: Default::default(),
+            summary,
+            description,
+            start_time,
+            end_time,
+        };
+
+        self.create_event(event_node);
 
         Ok(())
     }
@@ -619,6 +641,11 @@ impl App {
             &mut self.popup.summary,
             " Summary ",
             self.popup.active_field == ActiveField::Summary,
+        );
+        configure_insert_ta(
+            &mut self.popup.description,
+            " Description ",
+            self.popup.active_field == ActiveField::Description,
         );
         configure_insert_ta(
             &mut self.popup.start_time,
