@@ -57,6 +57,7 @@ pub enum AppMode {
     Insert,
     InsertEdit,
     Visual,
+    VisualEdit,
 }
 
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -192,6 +193,7 @@ impl App {
                     AppEvent::FetchFailed(_) => self.mode = Default::default(),
                     AppEvent::EventCreated(event_node) => self.add_event(event_node),
                     AppEvent::ReloadSuccess(events_fetched) => self.update_events(events_fetched),
+                    AppEvent::EventUpdated(event_node) => self.add_event(event_node),
                 },
             }
         }
@@ -217,6 +219,7 @@ impl App {
             AppMode::Insert => self.handle_insert_key_events(key_event),
             AppMode::InsertEdit => self.handle_insertedit_key_events(key_event),
             AppMode::Visual => self.handle_visual_key_events(key_event),
+            AppMode::VisualEdit => self.handle_visualedit_key_events(key_event),
         }
     }
 
@@ -293,10 +296,8 @@ impl App {
         Ok(())
     }
 
-    /// Handle insertedit key events
-    pub fn handle_insertedit_key_events(&mut self, key_event: KeyEvent) -> Result<()> {
+    fn handle_popup_events(&mut self, key_event: KeyEvent) {
         match key_event.code {
-            KeyCode::Esc => self.mode = AppMode::Insert,
             KeyCode::Tab => {
                 let active_field = match self.popup.active_field {
                     ActiveField::Summary => ActiveField::Description,
@@ -315,6 +316,15 @@ impl App {
                 };
                 self.switch_active_field(active_field);
             }
+            _ => {}
+        }
+    }
+
+    /// Handle insertedit key events
+    pub fn handle_insertedit_key_events(&mut self, key_event: KeyEvent) -> Result<()> {
+        match key_event.code {
+            KeyCode::Esc => self.mode = AppMode::Insert,
+            KeyCode::Tab | KeyCode::BackTab => self.handle_popup_events(key_event),
             KeyCode::Enter => {
                 if self.popup.active_field == ActiveField::Description {
                     self.popup.description.input(key_event);
@@ -356,11 +366,36 @@ impl App {
             KeyCode::Char('l') | KeyCode::Right => self.select_next_day_event(),
 
             // Open the selected event details
-            KeyCode::Enter => {}
+            KeyCode::Enter => self.enter_visual_event_details(),
 
             // Toggle
             KeyCode::Char('T') => self.is_now_timeline_visible = !self.is_now_timeline_visible,
             _ => {}
+        }
+        Ok(())
+    }
+
+    /// Handle visualedit key events
+    pub fn handle_visualedit_key_events(&mut self, key_event: KeyEvent) -> Result<()> {
+        match key_event.code {
+            KeyCode::Esc => self.mode = AppMode::Visual,
+            KeyCode::Tab | KeyCode::BackTab => self.handle_popup_events(key_event),
+            KeyCode::Enter => {
+                if self.popup.active_field == ActiveField::Description {
+                    self.popup.description.input(key_event);
+                } else {
+                    self.submit_popup()?
+                }
+            }
+            _ => {
+                let active_ta = match self.popup.active_field {
+                    ActiveField::Summary => &mut self.popup.summary,
+                    ActiveField::Description => &mut self.popup.description,
+                    ActiveField::StartTime => &mut self.popup.start_time,
+                    ActiveField::EndTime => &mut self.popup.end_time,
+                };
+                active_ta.input(key_event);
+            }
         }
         Ok(())
     }
@@ -429,6 +464,34 @@ impl App {
         });
     }
 
+    /// Trigger background request for patching event
+    pub fn patch_event(&mut self, event_node: EventNode) {
+        if let AppMode::Fetching = self.mode {
+            return;
+        }
+        self.mode = AppMode::Fetching;
+
+        let cal_clone = self.cal.clone();
+        let sender = self.events.sender.clone();
+
+        tokio::spawn(async move {
+            match cal_clone.patch_event(event_node).await {
+                Ok(event) => {
+                    let Ok(event_node) = EventNode::try_from(event) else {
+                        let _ = sender.send(Event::App(AppEvent::FetchFailed(
+                            "Failed to convert to eventnode".to_string(),
+                        )));
+                        return;
+                    };
+                    let _ = sender.send(Event::App(AppEvent::EventUpdated(event_node)));
+                }
+                Err(e) => {
+                    let _ = sender.send(Event::App(AppEvent::FetchFailed(e.to_string())));
+                }
+            }
+        });
+    }
+
     /// Add events
     fn add_events(&mut self, mut events_fetched: EventsFetched) {
         self.cal_event_nodes.append(&mut events_fetched.event_nodes);
@@ -440,16 +503,22 @@ impl App {
         self.mode = Default::default();
     }
     fn add_event(&mut self, event_node: EventNode) {
-        let start_date = event_node.start_time.date_naive();
-        let end_date = event_node.end_time.date_naive();
+        let start_date = event_node.start_time.with_timezone(&Local).date_naive();
+        let end_date = event_node.end_time.with_timezone(&Local).date_naive();
         if self.loaded_start <= start_date && self.loaded_end >= end_date {
-            let events_fetched = EventsFetched {
-                event_nodes: vec![event_node],
-                start_date,
-                end_date,
+            if self.mode == AppMode::InsertEdit {
+                self.cal_event_nodes.push(event_node);
+            } else if self.mode == AppMode::VisualEdit
+                && let Some(pos) = self
+                    .cal_event_nodes
+                    .iter()
+                    .position(|e| e.id == event_node.id)
+            {
+                self.cal_event_nodes[pos] = event_node;
             };
-            self.add_events(events_fetched);
+            self.cal_event_nodes.sort_by_key(|e| e.start_time);
         }
+        self.mode = Default::default();
     }
 
     /// Update events
@@ -642,15 +711,26 @@ impl App {
             }
         };
 
+        let id = match self.mode {
+            AppMode::InsertEdit => Default::default(),
+            AppMode::VisualEdit => self.cal_event_nodes[self.get_selected_index().unwrap_or(0)]
+                .id
+                .clone(),
+            _ => return Ok(()),
+        };
         let event_node = EventNode {
-            id: Default::default(),
+            id,
             summary,
             description,
             start_time,
             end_time,
         };
 
-        self.create_event(event_node);
+        if self.mode == AppMode::InsertEdit {
+            self.create_event(event_node);
+        } else if self.mode == AppMode::VisualEdit {
+            self.patch_event(event_node);
+        }
 
         Ok(())
     }
@@ -712,6 +792,40 @@ impl App {
         self.popup.end_time.select_all();
         self.popup.start_time.insert_str(start_str);
         self.popup.end_time.insert_str(end_str);
+
+        self.switch_active_field(Default::default());
+    }
+
+    /// Visual event details
+    fn enter_visual_event_details(&mut self) {
+        self.mode = AppMode::VisualEdit;
+
+        let Some(id) = self.get_selected_index() else {
+            return;
+        };
+
+        let event_node = &self.cal_event_nodes[id];
+
+        let local_start = event_node.start_time.with_timezone(&Local);
+        let local_end = event_node.end_time.with_timezone(&Local);
+
+        let start_str = local_start.format(TIME_FORMAT).to_string();
+        let end_str = local_end.format(TIME_FORMAT).to_string();
+
+        // modify the textarea instead of creating new ones to preserve styles
+        self.popup.summary.clear();
+        self.popup.description.clear();
+        self.popup.start_time.clear();
+        self.popup.end_time.clear();
+
+        self.popup.summary.insert_str(&event_node.summary);
+        if let Some(description) = &event_node.description {
+            self.popup.description.insert_str(description);
+        }
+        self.popup.start_time.insert_str(start_str);
+        self.popup.end_time.insert_str(end_str);
+
+        self.switch_active_field(Default::default());
     }
 
     /// Resize viewport

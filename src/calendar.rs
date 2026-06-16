@@ -135,4 +135,33 @@ impl Calendar {
 
         Ok(created_event)
     }
+
+    pub async fn patch_event(&self, event_node: EventNode) -> Result<Event> {
+        let start = EventDateTime {
+            date_time: Some(event_node.start_time),
+            ..Default::default()
+        };
+        let end = EventDateTime {
+            date_time: Some(event_node.end_time),
+            ..Default::default()
+        };
+
+        let patch_event = Event {
+            id: Some(event_node.id.clone()),
+            summary: Some(event_node.summary),
+            description: event_node.description,
+            start: Some(start),
+            end: Some(end),
+            ..Default::default()
+        };
+
+        let (_, updated_event) = self
+            .hub
+            .events()
+            .patch(patch_event, "primary", &event_node.id)
+            .doit()
+            .await?;
+
+        Ok(updated_event)
+    }
 }

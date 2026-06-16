@@ -326,7 +326,7 @@ impl Widget for &App {
         }
 
         // Draw Popup
-        if self.mode == AppMode::InsertEdit {
+        if self.mode == AppMode::InsertEdit || self.mode == AppMode::VisualEdit {
             let popup_area = area.centered(Constraint::Max(50), Constraint::Length((4 * 3) + 2));
 
             Clear.render(popup_area, buf);
