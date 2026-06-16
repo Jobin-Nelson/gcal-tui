@@ -307,7 +307,13 @@ impl App {
                 };
                 self.switch_active_field(active_field);
             }
-            KeyCode::Enter => self.submit_popup()?,
+            KeyCode::Enter => {
+                if self.popup.active_field == ActiveField::Description {
+                    self.popup.description.input(key_event);
+                } else {
+                    self.submit_popup()?
+                }
+            }
             _ => {
                 let active_ta = match self.popup.active_field {
                     ActiveField::Summary => &mut self.popup.summary,

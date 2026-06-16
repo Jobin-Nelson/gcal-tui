@@ -329,7 +329,7 @@ impl Widget for &App {
 
         // Draw Popup
         if self.mode == AppMode::InsertTyping {
-            let popup_area = area.centered(Constraint::Max(35), Constraint::Length((4 * 3) + 2));
+            let popup_area = area.centered(Constraint::Max(50), Constraint::Length((4 * 3) + 2));
 
             Clear.render(popup_area, buf);
 
@@ -343,12 +343,17 @@ impl Widget for &App {
                 vertical: 1,
             });
 
-            let [
-                summary_area,
-                description_area,
-                start_time_area,
-                end_time_area,
-            ] = popup_inner_area.layout(&Layout::vertical([Constraint::Length(3); 4]));
+            let [summary_area, description_area, time_area] =
+                popup_inner_area.layout(&Layout::vertical([
+                    Constraint::Length(3),
+                    Constraint::Length(7),
+                    Constraint::Length(3),
+                ]));
+
+            let [start_time_area, end_time_area] = time_area.layout(&Layout::horizontal([
+                Constraint::Fill(1),
+                Constraint::Fill(1),
+            ]));
 
             self.popup.summary.render(summary_area, buf);
             self.popup.description.render(description_area, buf);
