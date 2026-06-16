@@ -162,7 +162,7 @@ fn insert_event_to_rect(
         x: column_area.x,
         y: column_area.y + start_row,
         width: column_area.width,
-        height: end_row.saturating_sub(start_row),
+        height: end_row.saturating_sub(start_row).max(2),
     }
 }
 
@@ -307,12 +307,10 @@ impl Widget for &App {
 
             // Draw insert time block
             if self.mode == AppMode::Insert {
-                let insert_local_date = self
-                    .insert_event
-                    .start_time
-                    .with_timezone(&Local)
-                    .date_naive();
-                if day == &insert_local_date {
+                let insert_end_time = self.insert_event.start_time + self.insert_event.duration;
+                let is_overlapping =
+                    self.insert_event.start_time < viewport_end && insert_end_time > viewport_start;
+                if is_overlapping {
                     let insert_rect = insert_event_to_rect(
                         &self.insert_event,
                         viewport_start,

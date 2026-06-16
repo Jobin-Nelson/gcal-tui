@@ -471,17 +471,23 @@ impl App {
     /// Extend Insert Event
     fn extend_insert_up(&mut self) {
         let delta = TimeDelta::minutes(RESOLUTION_IN_MINS as i64);
-        self.insert_event.start_time -= delta;
-        self.insert_event.duration += delta;
+        if self.insert_event.duration > delta {
+            self.insert_event.duration -= delta;
+        }
         self.sync_viewport_to_cursor();
     }
     fn extend_insert_down(&mut self) {
         self.insert_event.duration += TimeDelta::minutes(RESOLUTION_IN_MINS as i64);
+        self.sync_viewport_to_cursor();
     }
     fn extend_insert_left(&mut self) {
         let delta = TimeDelta::days(1);
-        self.insert_event.start_time -= delta;
-        self.insert_event.duration += delta;
+        let min_duration = TimeDelta::minutes(RESOLUTION_IN_MINS as i64);
+        if self.insert_event.duration - delta >= min_duration {
+            self.insert_event.duration -= delta;
+        } else {
+            self.insert_event.duration = min_duration;
+        }
         self.sync_viewport_to_cursor();
     }
     fn extend_insert_right(&mut self) {
@@ -608,33 +614,36 @@ impl App {
 
     /// Sync viewport
     fn sync_viewport_to_cursor(&mut self) {
-        let cursor_local = self.insert_event.start_time.with_timezone(&Local);
-        let cursor_date = cursor_local.date_naive();
+        let cursor_start_local = self.insert_event.start_time.with_timezone(&Local);
+        let cursor_end_local =
+            (self.insert_event.start_time + self.insert_event.duration).with_timezone(&Local);
 
-        // shift start date if cursor moved out of current view
-        if cursor_date < self.start_date {
-            self.start_date = cursor_date;
+        let start_date = cursor_start_local.date_naive();
+        let end_date = cursor_end_local.date_naive();
+
+        // 1. Horizontal sync
+        // shift left if the start date moves out of view
+        if start_date < self.start_date {
+            self.start_date = start_date;
             self.check_pagination();
-        } else if cursor_date >= self.start_date + self.num_days {
-            self.start_date = cursor_date - self.num_days + TimeDelta::days(1);
+        // shift right if the end date pushes past the right edge of view
+        } else if end_date >= self.start_date + self.num_days {
+            self.start_date = end_date - self.num_days + TimeDelta::days(1);
             self.check_pagination();
         }
 
-        // Sync the vertical scroll
-        let cursor_mins = (cursor_local.hour() * 60 + cursor_local.minute()) as u16;
-
+        // 2. Vertical sync
+        let cursor_mins = (cursor_start_local.hour() * 60 + cursor_start_local.minute()) as u16;
         let viewport_top = self.scroll_offset;
         let viewport_bottom = self.scroll_offset + self.viewport_mins;
-        let insert_event_duration_mins = self.insert_event.duration.num_minutes() as u16;
+        let duration_mins = self.insert_event.duration.num_minutes() as u16;
 
-        // auto scroll up if cursor goes beyond the screen
+        // scroll up if the top edge goes above the screen
         if cursor_mins < viewport_top {
             self.scroll_offset = cursor_mins;
-        }
-        // auto scroll down if the cursor goes beyond the screen
-        // taking into account the height of the block so it doesn't get clipped
-        else if cursor_mins + insert_event_duration_mins > viewport_bottom {
-            let overflow = cursor_mins + insert_event_duration_mins - viewport_bottom;
+        // scroll down if the bottom edge goves below the screen
+        } else if cursor_mins + duration_mins >= viewport_bottom {
+            let overflow = (cursor_mins + duration_mins) - viewport_bottom;
             let max_offset = MINUTES_IN_DAY.saturating_sub(self.viewport_mins);
             self.scroll_offset = (self.scroll_offset + overflow).min(max_offset);
         }
