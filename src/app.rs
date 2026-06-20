@@ -194,7 +194,7 @@ impl App {
                 Event::App(app_event) => match app_event {
                     AppEvent::Quit => self.quit(),
                     AppEvent::FetchSuccess(events_fetched) => {
-                        self.handle_events_fetched(events_fetched)
+                        self.handle_fetched_events(events_fetched)
                     }
                     AppEvent::FetchFailed(_) => self.is_fetching = false,
                     AppEvent::EventCreated(event_node) => self.handle_event_created(event_node),
@@ -334,12 +334,8 @@ impl App {
         match key_event.code {
             KeyCode::Esc => self.mode = AppMode::Insert,
             KeyCode::Tab | KeyCode::BackTab => self.handle_popup_events(key_event),
-            KeyCode::Enter => {
-                if self.popup.active_field == ActiveField::Description {
-                    self.popup.description.input(key_event);
-                } else {
-                    self.submit_popup()?
-                }
+            KeyCode::Char('s' | 'S') if key_event.modifiers == KeyModifiers::CONTROL => {
+                self.submit_popup()?
             }
             _ => {
                 let active_ta = match self.popup.active_field {
@@ -392,12 +388,8 @@ impl App {
         match key_event.code {
             KeyCode::Esc => self.mode = AppMode::Visual,
             KeyCode::Tab | KeyCode::BackTab => self.handle_popup_events(key_event),
-            KeyCode::Enter => {
-                if self.popup.active_field == ActiveField::Description {
-                    self.popup.description.input(key_event);
-                } else {
-                    self.submit_popup()?
-                }
+            KeyCode::Char('s' | 'S') if key_event.modifiers == KeyModifiers::CONTROL => {
+                self.submit_popup()?
             }
             _ => {
                 let active_ta = match self.popup.active_field {
@@ -544,7 +536,7 @@ impl App {
     }
 
     /// Add events
-    fn handle_events_fetched(&mut self, mut events_fetched: EventsFetched) {
+    fn handle_fetched_events(&mut self, mut events_fetched: EventsFetched) {
         self.cal_event_nodes.append(&mut events_fetched.event_nodes);
         self.cal_event_nodes.sort_by_key(|e| e.start_time);
 
@@ -559,6 +551,7 @@ impl App {
         if self.loaded_start <= start_date && self.loaded_end >= end_date {
             if self.mode == AppMode::InsertEdit {
                 self.cal_event_nodes.push(event_node);
+                self.mode = AppMode::Insert;
             } else if self.mode == AppMode::VisualEdit
                 && let Some(pos) = self
                     .cal_event_nodes
@@ -566,6 +559,7 @@ impl App {
                     .position(|e| e.id == event_node.id)
             {
                 self.cal_event_nodes[pos] = event_node;
+                self.mode = AppMode::Visual;
             };
             self.cal_event_nodes.sort_by_key(|e| e.start_time);
         }
@@ -797,11 +791,9 @@ impl App {
         match self.mode {
             AppMode::InsertEdit => {
                 self.create_event(event_node);
-                self.mode = AppMode::Insert;
             }
             AppMode::VisualEdit => {
                 self.patch_event(event_node);
-                self.mode = AppMode::Visual;
             }
             _ => {}
         }
