@@ -23,6 +23,28 @@ pub struct Calendar {
     calendar_ids: Vec<String>,
 }
 
+impl From<EventNode> for Event {
+    fn from(value: EventNode) -> Self {
+        let start = EventDateTime {
+            date_time: Some(value.start_time),
+            ..Default::default()
+        };
+        let end = EventDateTime {
+            date_time: Some(value.end_time),
+            ..Default::default()
+        };
+
+        Event {
+            id: Some(value.id),
+            summary: Some(value.summary),
+            description: value.description,
+            start: Some(start),
+            end: Some(end),
+            ..Default::default()
+        }
+    }
+}
+
 impl Calendar {
     pub async fn new(config: Config) -> Result<Self> {
         // 1. Load the client_secret.json you downloaded from Google Cloud
@@ -109,22 +131,7 @@ impl Calendar {
     }
 
     pub async fn create_event(&self, event_node: EventNode) -> Result<Event> {
-        let start = EventDateTime {
-            date_time: Some(event_node.start_time),
-            ..Default::default()
-        };
-        let end = EventDateTime {
-            date_time: Some(event_node.end_time),
-            ..Default::default()
-        };
-
-        let new_event = Event {
-            summary: Some(event_node.summary),
-            description: event_node.description,
-            start: Some(start),
-            end: Some(end),
-            ..Default::default()
-        };
+        let new_event = event_node.into();
 
         let (_, created_event) = self
             .hub
@@ -137,31 +144,28 @@ impl Calendar {
     }
 
     pub async fn patch_event(&self, event_node: EventNode) -> Result<Event> {
-        let start = EventDateTime {
-            date_time: Some(event_node.start_time),
-            ..Default::default()
-        };
-        let end = EventDateTime {
-            date_time: Some(event_node.end_time),
-            ..Default::default()
-        };
-
-        let patch_event = Event {
-            id: Some(event_node.id.clone()),
-            summary: Some(event_node.summary),
-            description: event_node.description,
-            start: Some(start),
-            end: Some(end),
-            ..Default::default()
-        };
+        let event_id = event_node.id.clone();
+        let patch_event = event_node.into();
 
         let (_, updated_event) = self
             .hub
             .events()
-            .patch(patch_event, "primary", &event_node.id)
+            .patch(patch_event, "primary", &event_id)
             .doit()
             .await?;
 
         Ok(updated_event)
+    }
+
+    pub async fn delete_event(&self, event_node: EventNode) -> Result<()> {
+        let event_id = event_node.id;
+
+        self.hub
+            .events()
+            .delete("primary", &event_id)
+            .doit()
+            .await?;
+
+        Ok(())
     }
 }

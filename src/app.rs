@@ -57,6 +57,7 @@ pub enum AppMode {
     InsertEdit,
     Visual,
     VisualEdit,
+    DeleteConfirm,
 }
 
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -192,11 +193,16 @@ impl App {
                 },
                 Event::App(app_event) => match app_event {
                     AppEvent::Quit => self.quit(),
-                    AppEvent::FetchSuccess(events_fetched) => self.add_events(events_fetched),
+                    AppEvent::FetchSuccess(events_fetched) => {
+                        self.handle_events_fetched(events_fetched)
+                    }
                     AppEvent::FetchFailed(_) => self.is_fetching = false,
-                    AppEvent::EventCreated(event_node) => self.add_event(event_node),
-                    AppEvent::ReloadSuccess(events_fetched) => self.update_events(events_fetched),
-                    AppEvent::EventUpdated(event_node) => self.add_event(event_node),
+                    AppEvent::EventCreated(event_node) => self.handle_event_created(event_node),
+                    AppEvent::ReloadSuccess(events_fetched) => {
+                        self.handle_reload_events(events_fetched)
+                    }
+                    AppEvent::EventUpdated(event_node) => self.handle_event_created(event_node),
+                    AppEvent::EventDeleted(event_id) => self.handle_event_deleted(event_id),
                 },
             }
         }
@@ -219,9 +225,10 @@ impl App {
         match self.mode {
             AppMode::Normal => self.handle_normal_key_events(key_event),
             AppMode::Insert => self.handle_insert_key_events(key_event),
-            AppMode::InsertEdit => self.handle_insertedit_key_events(key_event),
+            AppMode::InsertEdit => self.handle_insert_edit_key_events(key_event),
             AppMode::Visual => self.handle_visual_key_events(key_event),
-            AppMode::VisualEdit => self.handle_visualedit_key_events(key_event),
+            AppMode::VisualEdit => self.handle_visual_edit_key_events(key_event),
+            AppMode::DeleteConfirm => self.handle_delete_confirm_key_events(key_event),
         }
     }
 
@@ -323,7 +330,7 @@ impl App {
     }
 
     /// Handle insertedit key events
-    pub fn handle_insertedit_key_events(&mut self, key_event: KeyEvent) -> Result<()> {
+    pub fn handle_insert_edit_key_events(&mut self, key_event: KeyEvent) -> Result<()> {
         match key_event.code {
             KeyCode::Esc => self.mode = AppMode::Insert,
             KeyCode::Tab | KeyCode::BackTab => self.handle_popup_events(key_event),
@@ -370,6 +377,9 @@ impl App {
             // Open the selected event details
             KeyCode::Enter => self.enter_visual_event_details(),
 
+            // Open delete popup
+            KeyCode::Char('d') => self.mode = AppMode::DeleteConfirm,
+
             // Toggle
             KeyCode::Char('T') => self.is_now_timeline_visible = !self.is_now_timeline_visible,
             _ => {}
@@ -378,7 +388,7 @@ impl App {
     }
 
     /// Handle visualedit key events
-    pub fn handle_visualedit_key_events(&mut self, key_event: KeyEvent) -> Result<()> {
+    pub fn handle_visual_edit_key_events(&mut self, key_event: KeyEvent) -> Result<()> {
         match key_event.code {
             KeyCode::Esc => self.mode = AppMode::Visual,
             KeyCode::Tab | KeyCode::BackTab => self.handle_popup_events(key_event),
@@ -398,6 +408,22 @@ impl App {
                 };
                 active_ta.input(key_event);
             }
+        }
+        Ok(())
+    }
+
+    /// Handle visualedit key events
+    pub fn handle_delete_confirm_key_events(&mut self, key_event: KeyEvent) -> Result<()> {
+        match key_event.code {
+            KeyCode::Esc => self.mode = AppMode::Visual,
+            KeyCode::Enter => {
+                // It should be only possible to enter delete confirm mode from visual mode
+                let event_node = self.get_selected_event().unwrap();
+
+                self.delete_event(event_node.clone());
+                self.mode = AppMode::Visual;
+            }
+            _ => {}
         }
         Ok(())
     }
@@ -494,8 +520,31 @@ impl App {
         });
     }
 
+    /// Trigger background request for deleting event
+    pub fn delete_event(&mut self, event_node: EventNode) {
+        if self.is_fetching {
+            return;
+        }
+        self.is_fetching = true;
+
+        let cal_clone = self.cal.clone();
+        let sender = self.events.sender.clone();
+
+        tokio::spawn(async move {
+            let event_id = event_node.id.clone();
+            match cal_clone.delete_event(event_node).await {
+                Ok(_) => {
+                    let _ = sender.send(Event::App(AppEvent::EventDeleted(event_id)));
+                }
+                Err(e) => {
+                    let _ = sender.send(Event::App(AppEvent::FetchFailed(e.to_string())));
+                }
+            }
+        });
+    }
+
     /// Add events
-    fn add_events(&mut self, mut events_fetched: EventsFetched) {
+    fn handle_events_fetched(&mut self, mut events_fetched: EventsFetched) {
         self.cal_event_nodes.append(&mut events_fetched.event_nodes);
         self.cal_event_nodes.sort_by_key(|e| e.start_time);
 
@@ -503,9 +552,8 @@ impl App {
         self.loaded_end = self.loaded_end.max(events_fetched.end_date);
 
         self.is_fetching = false;
-        self.mode = Default::default();
     }
-    fn add_event(&mut self, event_node: EventNode) {
+    fn handle_event_created(&mut self, event_node: EventNode) {
         let start_date = event_node.start_time.with_timezone(&Local).date_naive();
         let end_date = event_node.end_time.with_timezone(&Local).date_naive();
         if self.loaded_start <= start_date && self.loaded_end >= end_date {
@@ -522,11 +570,10 @@ impl App {
             self.cal_event_nodes.sort_by_key(|e| e.start_time);
         }
         self.is_fetching = false;
-        self.mode = Default::default();
     }
 
     /// Update events
-    fn update_events(&mut self, events_fetched: EventsFetched) {
+    fn handle_reload_events(&mut self, events_fetched: EventsFetched) {
         self.cal_event_nodes = events_fetched.event_nodes;
         self.cal_event_nodes.sort_by_key(|e| e.start_time);
 
@@ -534,7 +581,16 @@ impl App {
         self.loaded_end = events_fetched.end_date;
 
         self.is_fetching = false;
-        self.mode = Default::default();
+    }
+
+    /// delete event
+    fn handle_event_deleted(&mut self, event_id: String) {
+        self.cal_event_nodes.remove(
+            self.cal_event_nodes
+                .iter()
+                .position(|e| e.id == *event_id)
+                .unwrap(),
+        );
     }
 
     /// Scroll vertically
@@ -611,6 +667,13 @@ impl App {
     fn get_selected_index(&self) -> Option<usize> {
         if let Some(id) = &self.sel_event_id {
             self.cal_event_nodes.iter().position(|e| e.id == *id)
+        } else {
+            None
+        }
+    }
+    pub fn get_selected_event(&self) -> Option<&EventNode> {
+        if let Some(id) = &self.sel_event_id {
+            self.cal_event_nodes.iter().find(|e| e.id == *id)
         } else {
             None
         }
@@ -731,12 +794,17 @@ impl App {
             end_time,
         };
 
-        if self.mode == AppMode::InsertEdit {
-            self.create_event(event_node);
-        } else if self.mode == AppMode::VisualEdit {
-            self.patch_event(event_node);
+        match self.mode {
+            AppMode::InsertEdit => {
+                self.create_event(event_node);
+                self.mode = AppMode::Insert;
+            }
+            AppMode::VisualEdit => {
+                self.patch_event(event_node);
+                self.mode = AppMode::Visual;
+            }
+            _ => {}
         }
-
         Ok(())
     }
 

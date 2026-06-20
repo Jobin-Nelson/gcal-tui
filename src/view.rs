@@ -358,5 +358,23 @@ impl Widget for &App {
             self.popup.start_time.render(start_time_area, buf);
             self.popup.end_time.render(end_time_area, buf);
         }
+
+        if self.mode == AppMode::DeleteConfirm {
+            let popup_area = area.centered(Constraint::Percentage(40), Constraint::Percentage(40));
+            Clear.render(popup_area, buf);
+            let event_node = self.get_selected_event().unwrap();
+            Paragraph::new(vec![
+                Line::from("Are you sure you want to delete this Event?"),
+                Line::from(event_node.summary.as_str()),
+                Line::from("(Enter) Yes    |    (Esc) Cancel"),
+            ])
+            .alignment(Alignment::Center)
+            .block(
+                Block::bordered()
+                    .title(" Confirm ")
+                    .border_style(Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
+            )
+            .render(popup_area, buf);
+        }
     }
 }
