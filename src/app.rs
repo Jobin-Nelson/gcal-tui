@@ -53,7 +53,6 @@ impl TryFrom<CEvent> for EventNode {
 pub enum AppMode {
     #[default]
     Normal,
-    Fetching,
     Insert,
     InsertEdit,
     Visual,
@@ -109,6 +108,9 @@ pub struct App {
     // Insert event
     pub insert_event: InsertEvent,
     pub popup: EventPopup<'static>,
+
+    // Track background network status independently
+    pub is_fetching: bool,
 }
 
 impl App {
@@ -153,6 +155,7 @@ impl App {
             is_now_timeline_visible: true,
             insert_event,
             popup: Default::default(),
+            is_fetching: false,
         };
 
         app.fetch_events(
@@ -190,7 +193,7 @@ impl App {
                 Event::App(app_event) => match app_event {
                     AppEvent::Quit => self.quit(),
                     AppEvent::FetchSuccess(events_fetched) => self.add_events(events_fetched),
-                    AppEvent::FetchFailed(_) => self.mode = Default::default(),
+                    AppEvent::FetchFailed(_) => self.is_fetching = false,
                     AppEvent::EventCreated(event_node) => self.add_event(event_node),
                     AppEvent::ReloadSuccess(events_fetched) => self.update_events(events_fetched),
                     AppEvent::EventUpdated(event_node) => self.add_event(event_node),
@@ -215,7 +218,6 @@ impl App {
     pub fn handle_key_events(&mut self, key_event: KeyEvent) -> Result<()> {
         match self.mode {
             AppMode::Normal => self.handle_normal_key_events(key_event),
-            AppMode::Fetching => self.handle_normal_key_events(key_event),
             AppMode::Insert => self.handle_insert_key_events(key_event),
             AppMode::InsertEdit => self.handle_insertedit_key_events(key_event),
             AppMode::Visual => self.handle_visual_key_events(key_event),
@@ -252,7 +254,7 @@ impl App {
             KeyCode::Char('v') => {
                 self.mode = AppMode::Visual;
                 if self.sel_event_id.is_none() {
-                    self.select_first_visible_event();
+                    self.select_first_visible_current_day_event();
                 }
             }
             _ => {}
@@ -349,7 +351,7 @@ impl App {
     pub fn handle_visual_key_events(&mut self, key_event: KeyEvent) -> Result<()> {
         match key_event.code {
             KeyCode::Esc | KeyCode::Char('v') => {
-                self.mode = AppMode::Normal;
+                self.mode = Default::default();
                 self.sel_event_id = None;
             }
             KeyCode::Char('q') => self.events.send(AppEvent::Quit),
@@ -402,10 +404,10 @@ impl App {
 
     /// Trigger background fetch for new events
     pub fn fetch_events(&mut self, start_date: NaiveDate, end_date: NaiveDate, is_refresh: bool) {
-        if let AppMode::Fetching = self.mode {
+        if self.is_fetching {
             return;
         }
-        self.mode = AppMode::Fetching;
+        self.is_fetching = true;
 
         let cal_clone = self.cal.clone();
         let sender = self.events.sender.clone();
@@ -438,10 +440,10 @@ impl App {
 
     /// Trigger background request for creating event
     pub fn create_event(&mut self, event_node: EventNode) {
-        if let AppMode::Fetching = self.mode {
+        if self.is_fetching {
             return;
         }
-        self.mode = AppMode::Fetching;
+        self.is_fetching = true;
 
         let cal_clone = self.cal.clone();
         let sender = self.events.sender.clone();
@@ -466,10 +468,10 @@ impl App {
 
     /// Trigger background request for patching event
     pub fn patch_event(&mut self, event_node: EventNode) {
-        if let AppMode::Fetching = self.mode {
+        if self.is_fetching {
             return;
         }
-        self.mode = AppMode::Fetching;
+        self.is_fetching = true;
 
         let cal_clone = self.cal.clone();
         let sender = self.events.sender.clone();
@@ -500,6 +502,7 @@ impl App {
         self.loaded_start = self.loaded_start.min(events_fetched.start_date);
         self.loaded_end = self.loaded_end.max(events_fetched.end_date);
 
+        self.is_fetching = false;
         self.mode = Default::default();
     }
     fn add_event(&mut self, event_node: EventNode) {
@@ -518,6 +521,7 @@ impl App {
             };
             self.cal_event_nodes.sort_by_key(|e| e.start_time);
         }
+        self.is_fetching = false;
         self.mode = Default::default();
     }
 
@@ -529,6 +533,7 @@ impl App {
         self.loaded_start = events_fetched.start_date;
         self.loaded_end = events_fetched.end_date;
 
+        self.is_fetching = false;
         self.mode = Default::default();
     }
 
@@ -737,7 +742,7 @@ impl App {
 
     /// Pagination
     fn check_pagination(&mut self) {
-        if let AppMode::Fetching = self.mode {
+        if self.is_fetching {
             return;
         }
 
@@ -914,18 +919,19 @@ impl App {
         }
     }
 
-    fn select_first_visible_event(&mut self) {
+    fn select_first_visible_current_day_event(&mut self) {
         if self.cal_event_nodes.is_empty() {
             self.sel_event_id = None;
             return;
         };
-        let start_of_day = self.start_date.and_hms_opt(0, 0, 0).unwrap();
-        let start_of_day_local = Local.from_local_datetime(&start_of_day).unwrap();
+        let current_day = (self.start_date + START_OFFSET)
+            .and_hms_opt(0, 0, 0)
+            .unwrap();
+        let current_day_local = Local.from_local_datetime(&current_day).unwrap();
 
         // convert the current viewport top into UTC timestamp
-        let viewport_start_utc = (start_of_day_local
-            + TimeDelta::minutes(self.scroll_offset as i64))
-        .with_timezone(&Utc);
+        let viewport_start_utc =
+            (current_day_local + TimeDelta::minutes(self.scroll_offset as i64)).with_timezone(&Utc);
 
         // Find the first event whose end time extends past the top of viewport
         let first_visible_idx = self
