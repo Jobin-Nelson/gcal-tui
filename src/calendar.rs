@@ -13,7 +13,7 @@ use google_calendar3::{
     },
 };
 
-use crate::{Config, Result, app::EventNode};
+use crate::{Config, Result, app::EventNode, logging};
 
 type Hub = CalendarHub<HttpsConnector<HttpConnector>>;
 
@@ -61,6 +61,9 @@ impl Calendar {
         let executor = hyper_util::rt::TokioExecutor::new();
         // This will open a browser window the first time you run it to grant permissions.
         // The token is then cached locally in "tokencache.json".
+        let app_paths = logging::get_app_path();
+        let cache_path = app_paths.data_dir.join("tokencache.json");
+
         let auth = InstalledFlowAuthenticator::with_client(
             secret,
             InstalledFlowReturnMethod::HTTPRedirect,
@@ -68,7 +71,7 @@ impl Calendar {
                 Client::builder(executor.clone()).build(connector),
             ),
         )
-        .persist_tokens_to_disk("tokencache.json")
+        .persist_tokens_to_disk(cache_path)
         .build()
         .await?;
 

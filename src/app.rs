@@ -159,11 +159,12 @@ impl App {
             is_fetching: false,
         };
 
-        app.fetch_events(
+        app.initial_fetch_events(
             start_date - BUFFER_DAYS,
             start_date + app.num_days + BUFFER_DAYS,
-            true,
-        );
+        )
+        .await;
+
         app.switch_active_field(Default::default());
 
         Ok(app)
@@ -454,6 +455,21 @@ impl App {
                 }
             }
         });
+    }
+
+    /// Trigger intial background fetch for new events
+    pub async fn initial_fetch_events(&mut self, start_date: NaiveDate, end_date: NaiveDate) {
+        let events = self.cal.get_events(start_date, end_date).await.unwrap();
+        let event_nodes = events
+            .into_iter()
+            .filter_map(|e| e.try_into().ok())
+            .collect();
+        let events_fetched = EventsFetched {
+            event_nodes,
+            start_date,
+            end_date,
+        };
+        self.handle_reload_events(events_fetched);
     }
 
     /// Trigger background request for creating event
