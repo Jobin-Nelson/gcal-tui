@@ -1,5 +1,5 @@
 [package]
-name = "gcal-tui"
+name = "j-gcal"
 version = "0.1.0"
 edition = "2024"
 
@@ -22,3 +22,13 @@ toml = "1.1.2"
 tracing = "0.1.44"
 tracing-error = "0.2.1"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+
+[profile.release]
+codegen-units = 1 # Allows compiler to perform better optimization.
+lto = true # Enables Link-time Optimization.
+opt-level = "s" # Prioritizes small binary size. Use `3` if you prefer speed.
+strip = true # Ensures debug symbols are removed.
+
+[[bin]]
+name = "gcal"
+path = "src/main.rs"
