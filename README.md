@@ -38,3 +38,4 @@
 - `hjkl` to select the next and prev events
 - `enter` to edit the selected event
 - `control + s` to save the edits
+- `d` to delete events
