@@ -14,6 +14,10 @@
 - [ ] Support multiple calendars
 - [ ] Show multi modal status
 
+## Installation
+
+- `cargo install --locked j-gcal`
+
 ## Keybinds
 
 - Supports vim keybinds
