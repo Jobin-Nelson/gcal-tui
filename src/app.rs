@@ -15,10 +15,10 @@ use ratatui::{
 };
 use ratatui_textarea::TextArea;
 
-#[derive(Debug, Clone)]
-pub struct EventNodeOrganizer {
-    display_name: String,
-    email: String,
+#[derive(Debug, Clone, Default)]
+pub struct CalendarInfo {
+    pub display_name: String,
+    pub id: String,
 }
 
 #[derive(Debug, Clone)]
@@ -28,7 +28,7 @@ pub struct EventNode {
     pub description: Option<String>,
     pub start_time: DateTime<Utc>,
     pub end_time: DateTime<Utc>,
-    pub organizer: EventNodeOrganizer,
+    pub cal_info: CalendarInfo,
 }
 
 impl TryFrom<CEvent> for EventNode {
@@ -46,9 +46,11 @@ impl TryFrom<CEvent> for EventNode {
         };
 
         let summary = cal_event.summary.unwrap_or_else(|| "Untitled".to_string());
-        let organizer = EventNodeOrganizer {
-            display_name: organizer.display_name.unwrap(),
-            email: organizer.email.unwrap(),
+        let cal_info = CalendarInfo {
+            display_name: organizer
+                .display_name
+                .unwrap_or_else(|| "Untitled".to_string()),
+            id: organizer.email.unwrap(),
         };
 
         Ok(EventNode {
@@ -57,7 +59,7 @@ impl TryFrom<CEvent> for EventNode {
             description: cal_event.description,
             start_time: event_start_datetime,
             end_time: event_end_datetime,
-            organizer,
+            cal_info,
         })
     }
 }
@@ -80,6 +82,7 @@ pub enum ActiveField {
     Description,
     StartTime,
     EndTime,
+    Calendar,
 }
 
 #[derive(Debug, Default)]
@@ -113,11 +116,13 @@ pub struct App {
     pub is_now_timeline_visible: bool,
 
     pub sel_event_id: Option<String>,
+    pub sel_cal_id: Option<String>,
 
     // Load events
     pub cal: Calendar,
     pub loaded_start: NaiveDate,
     pub loaded_end: NaiveDate,
+    pub cal_infos: Vec<CalendarInfo>,
 
     // Insert event
     pub insert_event: InsertEvent,
@@ -160,6 +165,7 @@ impl App {
             events: Default::default(),
             cal_event_nodes: Default::default(),
             sel_event_id: Default::default(),
+            sel_cal_id: Default::default(),
             start_date,
             num_days: NUM_DAYS,
             cal,
@@ -170,6 +176,7 @@ impl App {
             insert_event,
             popup: Default::default(),
             is_fetching: false,
+            cal_infos: Default::default(),
         };
 
         app.initial_fetch_events(
@@ -326,18 +333,26 @@ impl App {
                     ActiveField::Summary => ActiveField::Description,
                     ActiveField::Description => ActiveField::StartTime,
                     ActiveField::StartTime => ActiveField::EndTime,
-                    ActiveField::EndTime => ActiveField::Summary,
+                    ActiveField::EndTime => ActiveField::Calendar,
+                    ActiveField::Calendar => ActiveField::Summary,
                 };
                 self.switch_active_field(active_field);
             }
             KeyCode::BackTab => {
                 let active_field = match self.popup.active_field {
-                    ActiveField::Summary => ActiveField::EndTime,
+                    ActiveField::Summary => ActiveField::Calendar,
                     ActiveField::Description => ActiveField::Summary,
                     ActiveField::StartTime => ActiveField::Description,
                     ActiveField::EndTime => ActiveField::StartTime,
+                    ActiveField::Calendar => ActiveField::EndTime,
                 };
                 self.switch_active_field(active_field);
+            }
+            KeyCode::Char('h') if key_event.modifiers == KeyModifiers::CONTROL => {
+                self.select_prev_cal();
+            }
+            KeyCode::Char('l') if key_event.modifiers == KeyModifiers::CONTROL => {
+                self.select_next_cal();
             }
             _ => {}
         }
@@ -348,6 +363,9 @@ impl App {
         match key_event.code {
             KeyCode::Esc => self.mode = AppMode::Insert,
             KeyCode::Tab | KeyCode::BackTab => self.handle_popup_events(key_event),
+            KeyCode::Char('h' | 'l') if key_event.modifiers == KeyModifiers::CONTROL => {
+                self.handle_popup_events(key_event);
+            }
             KeyCode::Char('s' | 'S') if key_event.modifiers == KeyModifiers::CONTROL => {
                 self.submit_popup()?
             }
@@ -357,6 +375,7 @@ impl App {
                     ActiveField::Description => &mut self.popup.description,
                     ActiveField::StartTime => &mut self.popup.start_time,
                     ActiveField::EndTime => &mut self.popup.end_time,
+                    ActiveField::Calendar => return Ok(()),
                 };
                 active_ta.input(key_event);
             }
@@ -411,6 +430,7 @@ impl App {
                     ActiveField::Description => &mut self.popup.description,
                     ActiveField::StartTime => &mut self.popup.start_time,
                     ActiveField::EndTime => &mut self.popup.end_time,
+                    ActiveField::Calendar => return Ok(()),
                 };
                 active_ta.input(key_event);
             }
@@ -687,7 +707,7 @@ impl App {
     }
 
     /// Select Visual Events
-    fn get_selected_index(&self) -> Option<usize> {
+    fn get_selected_event_index(&self) -> Option<usize> {
         if let Some(id) = &self.sel_event_id {
             self.cal_event_nodes.iter().position(|e| e.id == *id)
         } else {
@@ -706,7 +726,7 @@ impl App {
             return;
         }
 
-        let next_idx = match self.get_selected_index() {
+        let next_idx = match self.get_selected_event_index() {
             Some(idx) => (idx + 1).min(self.cal_event_nodes.len() - 1),
             None => 0,
         };
@@ -718,7 +738,7 @@ impl App {
         if self.cal_event_nodes.is_empty() {
             return;
         }
-        let prev_idx = match self.get_selected_index() {
+        let prev_idx = match self.get_selected_event_index() {
             Some(idx) => idx.saturating_sub(1),
             None => 0,
         };
@@ -731,7 +751,7 @@ impl App {
             return;
         }
 
-        let current_idx = self.get_selected_index().unwrap_or(0);
+        let current_idx = self.get_selected_event_index().unwrap_or(0);
         let current_date = self.cal_event_nodes[current_idx]
             .start_time
             .with_timezone(&Local)
@@ -750,7 +770,7 @@ impl App {
             return;
         }
 
-        let current_idx = self.get_selected_index().unwrap_or(0);
+        let current_idx = self.get_selected_event_index().unwrap_or(0);
         let current_date = self.cal_event_nodes[current_idx]
             .start_time
             .with_timezone(&Local)
@@ -804,17 +824,21 @@ impl App {
 
         let id = match self.mode {
             AppMode::InsertEdit => Default::default(),
-            AppMode::VisualEdit => self.cal_event_nodes[self.get_selected_index().unwrap_or(0)]
-                .id
-                .clone(),
+            AppMode::VisualEdit => self.cal_event_nodes
+                [self.get_selected_event_index().unwrap_or_default()]
+            .id
+            .clone(),
             _ => return Ok(()),
         };
+
+        let cal_info = self.cal_infos[self.get_selected_cal_index().unwrap_or_default()].clone();
         let event_node = EventNode {
             id,
             summary,
             description,
             start_time,
             end_time,
+            cal_info,
         };
 
         match self.mode {
@@ -827,6 +851,33 @@ impl App {
             _ => {}
         }
         Ok(())
+    }
+
+    // Calendar
+    fn get_selected_cal_index(&self) -> Option<usize> {
+        if let Some(id) = &self.sel_cal_id {
+            self.cal_infos.iter().position(|c| c.id == *id)
+        } else {
+            None
+        }
+    }
+    fn select_prev_cal(&mut self) {
+        if self.cal_infos.is_empty() {
+            return;
+        }
+        let cal_len = self.cal_infos.len();
+        let curr_idx = self.get_selected_cal_index().unwrap_or_default();
+        let prev_idx = (curr_idx + cal_len - 1) % cal_len;
+        self.sel_cal_id = self.cal_infos.get(prev_idx).map(|c| c.id.clone());
+    }
+    fn select_next_cal(&mut self) {
+        if self.cal_infos.is_empty() {
+            return;
+        }
+        let cal_len = self.cal_infos.len();
+        let curr_idx = self.get_selected_cal_index().unwrap_or_default();
+        let next_idx = (curr_idx + 1) % cal_len;
+        self.sel_cal_id = self.cal_infos.get(next_idx).map(|c| c.id.clone());
     }
 
     /// Pagination
@@ -894,7 +945,7 @@ impl App {
     fn enter_visual_event_details(&mut self) {
         self.mode = AppMode::VisualEdit;
 
-        let Some(id) = self.get_selected_index() else {
+        let Some(id) = self.get_selected_event_index() else {
             return;
         };
 
@@ -972,7 +1023,7 @@ impl App {
     }
 
     fn sync_viewport_to_selected_event(&mut self) {
-        let Some(idx) = self.get_selected_index() else {
+        let Some(idx) = self.get_selected_event_index() else {
             return;
         };
 
@@ -1038,22 +1089,22 @@ impl App {
     fn switch_active_field(&mut self, field: ActiveField) {
         self.popup.active_field = field;
 
-        configure_insert_ta(
+        configure_ta(
             &mut self.popup.summary,
             " Summary ",
             self.popup.active_field == ActiveField::Summary,
         );
-        configure_insert_ta(
+        configure_ta(
             &mut self.popup.description,
             " Description ",
             self.popup.active_field == ActiveField::Description,
         );
-        configure_insert_ta(
+        configure_ta(
             &mut self.popup.start_time,
             " Start Time ",
             self.popup.active_field == ActiveField::StartTime,
         );
-        configure_insert_ta(
+        configure_ta(
             &mut self.popup.end_time,
             " End Time ",
             self.popup.active_field == ActiveField::EndTime,
@@ -1061,7 +1112,7 @@ impl App {
     }
 }
 
-fn configure_insert_ta<'a>(ta: &mut TextArea<'a>, title: &'a str, is_active: bool) {
+fn configure_ta<'a>(ta: &mut TextArea<'a>, title: &'a str, is_active: bool) {
     let mut block = Block::bordered().title(title);
 
     if is_active {

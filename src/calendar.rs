@@ -2,7 +2,7 @@ use chrono::{Local, NaiveDate};
 use futures::stream::{self, StreamExt, TryStreamExt};
 use google_calendar3::{
     CalendarHub,
-    api::{Event, EventDateTime, EventOrganizer},
+    api::{Event, EventDateTime},
     hyper_rustls::{HttpsConnector, HttpsConnectorBuilder},
     hyper_util::{
         self,
@@ -134,7 +134,7 @@ impl Calendar {
     }
 
     pub async fn create_event(&self, mut event_node: EventNode) -> Result<Event> {
-        let calendar_id = std::mem::take(&mut event_node.organizer.email);
+        let calendar_id = std::mem::take(&mut event_node.cal_info.id);
         let new_event = event_node.into();
 
         let (_, created_event) = self
@@ -149,7 +149,7 @@ impl Calendar {
 
     pub async fn patch_event(&self, mut event_node: EventNode) -> Result<Event> {
         let event_id = event_node.id.clone();
-        let calendar_id = std::mem::take(&mut event_node.organizer.email);
+        let calendar_id = std::mem::take(&mut event_node.cal_info.id);
         let patch_event = event_node.into();
 
         let (_, updated_event) = self
@@ -163,7 +163,7 @@ impl Calendar {
     }
 
     pub async fn delete_event(&self, mut event_node: EventNode) -> Result<()> {
-        let calendar_id = std::mem::take(&mut event_node.organizer.email);
+        let calendar_id = std::mem::take(&mut event_node.cal_info.id);
         let event_id = event_node.id;
 
         self.hub
