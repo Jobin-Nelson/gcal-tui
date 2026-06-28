@@ -6,7 +6,7 @@ use crate::event::{AppEvent, Event, EventHandler, EventsFetched};
 use crate::{Calendar, Config, Result};
 
 use chrono::{DateTime, Local, NaiveDate, NaiveDateTime, TimeDelta, TimeZone, Timelike, Utc};
-use google_calendar3::api::Event as CEvent;
+use google_calendar3::api::{Calendar as GCalendar, Event as CEvent};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::widgets::Block;
 use ratatui::{
@@ -19,6 +19,17 @@ use ratatui_textarea::TextArea;
 pub struct CalendarInfo {
     pub display_name: String,
     pub id: String,
+}
+
+impl TryFrom<GCalendar> for CalendarInfo {
+    type Error = ();
+
+    fn try_from(value: GCalendar) -> std::result::Result<Self, Self::Error> {
+        Ok(Self {
+            display_name: value.summary.unwrap_or_else(|| "Untitled".to_string()),
+            id: value.id.ok_or(())?,
+        })
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -214,16 +225,17 @@ impl App {
                 },
                 Event::App(app_event) => match app_event {
                     AppEvent::Quit => self.quit(),
-                    AppEvent::FetchSuccess(events_fetched) => {
+                    AppEvent::EventFetched(events_fetched) => {
                         self.handle_fetched_events(events_fetched)
                     }
                     AppEvent::FetchFailed(_) => self.is_fetching = false,
                     AppEvent::EventCreated(event_node) => self.handle_event_created(event_node),
-                    AppEvent::ReloadSuccess(events_fetched) => {
+                    AppEvent::EventReload(events_fetched) => {
                         self.handle_reload_events(events_fetched)
                     }
                     AppEvent::EventUpdated(event_node) => self.handle_event_created(event_node),
                     AppEvent::EventDeleted(event_id) => self.handle_event_deleted(event_id),
+                    AppEvent::CalendarFetched(cal_infos) => self.handle_fetched_cals(cal_infos),
                 },
             }
         }
@@ -477,9 +489,9 @@ impl App {
                         end_date,
                     };
                     let app_event = if is_refresh {
-                        AppEvent::ReloadSuccess(events_fetched)
+                        AppEvent::EventReload(events_fetched)
                     } else {
-                        AppEvent::FetchSuccess(events_fetched)
+                        AppEvent::EventFetched(events_fetched)
                     };
                     let _ = sender.send(Event::App(app_event));
                 }
@@ -503,6 +515,23 @@ impl App {
             end_date,
         };
         self.handle_reload_events(events_fetched);
+
+        // Populate the calendars
+        self.is_fetching = true;
+        let cal_clone = self.cal.clone();
+        let sender = self.events.sender.clone();
+
+        tokio::spawn(async move {
+            match cal_clone.get_calendars_info().await {
+                Ok(cal) => {
+                    let cal_infos = cal.into_iter().filter_map(|c| c.try_into().ok()).collect();
+                    let _ = sender.send(Event::App(AppEvent::CalendarFetched(cal_infos)));
+                }
+                Err(e) => {
+                    let _ = sender.send(Event::App(AppEvent::FetchFailed(e.to_string())));
+                }
+            }
+        });
     }
 
     /// Trigger background request for creating event
@@ -584,6 +613,12 @@ impl App {
         });
     }
 
+    /// Add calendars
+    fn handle_fetched_cals(&mut self, cal_infos: Vec<CalendarInfo>) {
+        self.cal_infos = cal_infos;
+        self.is_fetching = false;
+    }
+
     /// Add events
     fn handle_fetched_events(&mut self, mut events_fetched: EventsFetched) {
         self.cal_event_nodes.append(&mut events_fetched.event_nodes);
@@ -634,6 +669,7 @@ impl App {
                 .position(|e| e.id == *event_id)
                 .unwrap(),
         );
+        self.is_fetching = false;
     }
 
     /// Scroll vertically

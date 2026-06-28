@@ -1,4 +1,7 @@
-use crate::{Result, app::EventNode};
+use crate::{
+    Result,
+    app::{CalendarInfo, EventNode},
+};
 
 use chrono::NaiveDate;
 use futures::{FutureExt, StreamExt};
@@ -44,12 +47,13 @@ pub enum AppEvent {
     Quit,
 
     // Fetch
-    ReloadSuccess(EventsFetched),
-    FetchSuccess(EventsFetched),
+    EventReload(EventsFetched),
+    EventFetched(EventsFetched),
     FetchFailed(String),
     EventCreated(EventNode),
     EventUpdated(EventNode),
     EventDeleted(String),
+    CalendarFetched(Vec<CalendarInfo>),
 }
 
 /// Terminal event handler.
