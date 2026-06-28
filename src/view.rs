@@ -327,7 +327,7 @@ impl Widget for &App {
 
         // Draw Popup
         if self.mode == AppMode::InsertEdit || self.mode == AppMode::VisualEdit {
-            let popup_area = area.centered(Constraint::Max(50), Constraint::Length((5 * 3) + 2));
+            let popup_area = area.centered(Constraint::Length(60), Constraint::Length((5 * 3) + 2));
 
             Clear.render(popup_area, buf);
             let popup_title = match self.mode {
@@ -370,13 +370,17 @@ impl Widget for &App {
                 .iter()
                 .map(|c| c.display_name.as_str())
                 .collect();
+            let cal_inner_area = cal_area.inner(Margin {
+                horizontal: 1,
+                vertical: 1,
+            });
             Tabs::new(cals)
                 .style(Style::default().fg(Color::DarkGray))
                 .highlight_style(Style::default().yellow().bold())
                 .select(cal_idx)
                 .divider(symbols::DOT)
                 .padding(" ", " ")
-                .render(cal_area, buf);
+                .render(cal_inner_area, buf);
         }
 
         if self.mode == AppMode::DeleteConfirm {
