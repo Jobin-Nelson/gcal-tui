@@ -5,9 +5,9 @@ use ratatui::{
     buffer::Buffer,
     layout::{Alignment, Constraint, Layout, Margin, Rect, Spacing},
     style::{Color, Modifier, Style},
-    symbols::merge::MergeStrategy,
+    symbols::{self, merge::MergeStrategy},
     text::Line,
-    widgets::{Block, Borders, Clear, Paragraph, Widget, Wrap},
+    widgets::{Block, Borders, Clear, Paragraph, Tabs, Widget, Wrap},
 };
 
 use crate::{
@@ -327,12 +327,17 @@ impl Widget for &App {
 
         // Draw Popup
         if self.mode == AppMode::InsertEdit || self.mode == AppMode::VisualEdit {
-            let popup_area = area.centered(Constraint::Max(50), Constraint::Length((4 * 3) + 2));
+            let popup_area = area.centered(Constraint::Max(50), Constraint::Length((5 * 3) + 2));
 
             Clear.render(popup_area, buf);
+            let popup_title = match self.mode {
+                AppMode::InsertEdit => " Create Event ",
+                AppMode::VisualEdit => " Edit Event ",
+                _ => unreachable!(),
+            };
 
             Block::bordered()
-                .title(" Create Event ")
+                .title(popup_title)
                 .border_style(Style::default().fg(Color::Cyan))
                 .render(popup_area, buf);
 
@@ -341,10 +346,11 @@ impl Widget for &App {
                 vertical: 1,
             });
 
-            let [summary_area, description_area, time_area] =
+            let [summary_area, description_area, time_area, cal_area] =
                 popup_inner_area.layout(&Layout::vertical([
                     Constraint::Length(3),
                     Constraint::Length(7),
+                    Constraint::Length(3),
                     Constraint::Length(3),
                 ]));
 
@@ -357,6 +363,20 @@ impl Widget for &App {
             self.popup.description.render(description_area, buf);
             self.popup.start_time.render(start_time_area, buf);
             self.popup.end_time.render(end_time_area, buf);
+
+            let cal_idx = self.get_selected_cal_index();
+            let cals: Vec<_> = self
+                .cal_infos
+                .iter()
+                .map(|c| c.display_name.as_str())
+                .collect();
+            Tabs::new(cals)
+                .style(Style::default().fg(Color::DarkGray))
+                .highlight_style(Style::default().yellow().bold())
+                .select(cal_idx)
+                .divider(symbols::DOT)
+                .padding(" ", " ")
+                .render(cal_area, buf);
         }
 
         if self.mode == AppMode::DeleteConfirm {

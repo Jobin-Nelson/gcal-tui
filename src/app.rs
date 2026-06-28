@@ -127,7 +127,7 @@ pub struct App {
     pub is_now_timeline_visible: bool,
 
     pub sel_event_id: Option<String>,
-    pub sel_cal_id: Option<String>,
+    pub sel_cal_ind: Option<usize>,
 
     // Load events
     pub cal: Calendar,
@@ -176,7 +176,7 @@ impl App {
             events: Default::default(),
             cal_event_nodes: Default::default(),
             sel_event_id: Default::default(),
-            sel_cal_id: Default::default(),
+            sel_cal_ind: Default::default(),
             start_date,
             num_days: NUM_DAYS,
             cal,
@@ -432,6 +432,9 @@ impl App {
     pub fn handle_visual_edit_key_events(&mut self, key_event: KeyEvent) -> Result<()> {
         match key_event.code {
             KeyCode::Esc => self.mode = AppMode::Visual,
+            KeyCode::Char('h' | 'l') if key_event.modifiers == KeyModifiers::CONTROL => {
+                self.handle_popup_events(key_event);
+            }
             KeyCode::Tab | KeyCode::BackTab => self.handle_popup_events(key_event),
             KeyCode::Char('s' | 'S') if key_event.modifiers == KeyModifiers::CONTROL => {
                 self.submit_popup()?
@@ -867,7 +870,7 @@ impl App {
             _ => return Ok(()),
         };
 
-        let cal_info = self.cal_infos[self.get_selected_cal_index().unwrap_or_default()].clone();
+        let cal_info = self.cal_infos[self.get_selected_cal_index()].clone();
         let event_node = EventNode {
             id,
             summary,
@@ -890,30 +893,30 @@ impl App {
     }
 
     // Calendar
-    fn get_selected_cal_index(&self) -> Option<usize> {
-        if let Some(id) = &self.sel_cal_id {
-            self.cal_infos.iter().position(|c| c.id == *id)
-        } else {
-            None
-        }
+    pub fn get_selected_cal_index(&self) -> usize {
+        let AppMode::VisualEdit = self.mode else {
+            return 0;
+        };
+
+        self.sel_cal_ind.unwrap_or_default()
     }
     fn select_prev_cal(&mut self) {
         if self.cal_infos.is_empty() {
             return;
         }
         let cal_len = self.cal_infos.len();
-        let curr_idx = self.get_selected_cal_index().unwrap_or_default();
+        let curr_idx = self.get_selected_cal_index();
         let prev_idx = (curr_idx + cal_len - 1) % cal_len;
-        self.sel_cal_id = self.cal_infos.get(prev_idx).map(|c| c.id.clone());
+        self.sel_cal_ind = Some(prev_idx);
     }
     fn select_next_cal(&mut self) {
         if self.cal_infos.is_empty() {
             return;
         }
         let cal_len = self.cal_infos.len();
-        let curr_idx = self.get_selected_cal_index().unwrap_or_default();
+        let curr_idx = self.get_selected_cal_index();
         let next_idx = (curr_idx + 1) % cal_len;
-        self.sel_cal_id = self.cal_infos.get(next_idx).map(|c| c.id.clone());
+        self.sel_cal_ind = Some(next_idx);
     }
 
     /// Pagination
@@ -965,6 +968,8 @@ impl App {
         let start_str = local_start.format(TIME_FORMAT).to_string();
         let end_str = local_end.format(TIME_FORMAT).to_string();
 
+        self.sel_cal_ind = None;
+
         // modify the textarea instead of creating new ones to preserve styles
         self.popup.summary.clear();
         self.popup.description.clear();
@@ -992,6 +997,11 @@ impl App {
 
         let start_str = local_start.format(TIME_FORMAT).to_string();
         let end_str = local_end.format(TIME_FORMAT).to_string();
+
+        self.sel_cal_ind = self
+            .cal_infos
+            .iter()
+            .position(|c| c.id == event_node.cal_info.id);
 
         // modify the textarea instead of creating new ones to preserve styles
         self.popup.summary.clear();

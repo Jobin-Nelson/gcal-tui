@@ -12,3 +12,4 @@ pub const BUFFER_DAYS: TimeDelta = TimeDelta::days(3);
 pub const FETCH_DAYS: TimeDelta = TimeDelta::days(7);
 pub const START_OFFSET: TimeDelta = TimeDelta::days(1);
 pub const TIME_FORMAT: &str = "%Y-%m-%d %H:%M";
+pub const SCOPE: &str = "https://www.googleapis.com/auth/calendar";

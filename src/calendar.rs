@@ -13,7 +13,7 @@ use google_calendar3::{
     },
 };
 
-use crate::{Config, Result, app::EventNode, logging};
+use crate::{Config, Result, app::EventNode, constants::SCOPE, logging};
 
 type Hub = CalendarHub<HttpsConnector<HttpConnector>>;
 
@@ -75,7 +75,7 @@ impl Calendar {
         .build()
         .await?;
 
-        let mandatory_scope = &["https://www.googleapis.com/auth/calendar"];
+        let mandatory_scope = &[SCOPE];
         auth.token(mandatory_scope)
             .await
             .expect("Failed to seed token cache");
@@ -101,7 +101,12 @@ impl Calendar {
         stream::iter(cal_ids.into_iter().map(|cal_id| {
             let hub_clone = self.hub.clone();
             async move {
-                let (_, calendar) = hub_clone.calendars().get(&cal_id).doit().await?;
+                let (_, calendar) = hub_clone
+                    .calendars()
+                    .get(&cal_id)
+                    .add_scope(SCOPE)
+                    .doit()
+                    .await?;
                 Ok(calendar)
             }
         }))
@@ -138,6 +143,7 @@ impl Calendar {
                     .time_max(end_time.to_utc())
                     .single_events(true) // Crucial: expands recurring events into individual instances
                     .order_by("startTime") // Returns them chronologically
+                    .add_scope(SCOPE)
                     .doit()
                     .await?;
                 Ok(event_list.items.unwrap_or_default())
@@ -156,6 +162,7 @@ impl Calendar {
             .hub
             .events()
             .insert(new_event, &calendar_id)
+            .add_scope(SCOPE)
             .doit()
             .await?;
 
@@ -171,6 +178,7 @@ impl Calendar {
             .hub
             .events()
             .patch(patch_event, &calendar_id, &event_id)
+            .add_scope(SCOPE)
             .doit()
             .await?;
 
@@ -184,6 +192,7 @@ impl Calendar {
         self.hub
             .events()
             .delete(&calendar_id, &event_id)
+            .add_scope(SCOPE)
             .doit()
             .await?;
 
