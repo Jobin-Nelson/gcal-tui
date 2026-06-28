@@ -2,7 +2,7 @@ use chrono::{Local, NaiveDate};
 use futures::stream::{self, StreamExt, TryStreamExt};
 use google_calendar3::{
     CalendarHub,
-    api::{Event, EventDateTime},
+    api::{Event, EventDateTime, EventOrganizer},
     hyper_rustls::{HttpsConnector, HttpsConnectorBuilder},
     hyper_util::{
         self,
@@ -133,39 +133,42 @@ impl Calendar {
         .await
     }
 
-    pub async fn create_event(&self, event_node: EventNode) -> Result<Event> {
+    pub async fn create_event(&self, mut event_node: EventNode) -> Result<Event> {
+        let calendar_id = std::mem::take(&mut event_node.organizer.email);
         let new_event = event_node.into();
 
         let (_, created_event) = self
             .hub
             .events()
-            .insert(new_event, "primary")
+            .insert(new_event, &calendar_id)
             .doit()
             .await?;
 
         Ok(created_event)
     }
 
-    pub async fn patch_event(&self, event_node: EventNode) -> Result<Event> {
+    pub async fn patch_event(&self, mut event_node: EventNode) -> Result<Event> {
         let event_id = event_node.id.clone();
+        let calendar_id = std::mem::take(&mut event_node.organizer.email);
         let patch_event = event_node.into();
 
         let (_, updated_event) = self
             .hub
             .events()
-            .patch(patch_event, "primary", &event_id)
+            .patch(patch_event, &calendar_id, &event_id)
             .doit()
             .await?;
 
         Ok(updated_event)
     }
 
-    pub async fn delete_event(&self, event_node: EventNode) -> Result<()> {
+    pub async fn delete_event(&self, mut event_node: EventNode) -> Result<()> {
+        let calendar_id = std::mem::take(&mut event_node.organizer.email);
         let event_id = event_node.id;
 
         self.hub
             .events()
-            .delete("primary", &event_id)
+            .delete(&calendar_id, &event_id)
             .doit()
             .await?;
 
