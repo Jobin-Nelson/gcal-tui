@@ -16,12 +16,19 @@ use ratatui::{
 use ratatui_textarea::TextArea;
 
 #[derive(Debug, Clone)]
+pub struct EventNodeOrganizer {
+    display_name: String,
+    email: String,
+}
+
+#[derive(Debug, Clone)]
 pub struct EventNode {
     pub id: String,
     pub summary: String,
     pub description: Option<String>,
     pub start_time: DateTime<Utc>,
     pub end_time: DateTime<Utc>,
+    pub organizer: EventNodeOrganizer,
 }
 
 impl TryFrom<CEvent> for EventNode {
@@ -30,14 +37,19 @@ impl TryFrom<CEvent> for EventNode {
     fn try_from(cal_event: CEvent) -> std::result::Result<Self, Self::Error> {
         let event_start_datetime = cal_event.start.and_then(|d| d.date_time);
         let event_end_datetime = cal_event.end.and_then(|d| d.date_time);
+        let organizer = cal_event.organizer;
 
-        let (Some(event_start_datetime), Some(event_end_datetime)) =
-            (event_start_datetime, event_end_datetime)
+        let (Some(event_start_datetime), Some(event_end_datetime), Some(organizer)) =
+            (event_start_datetime, event_end_datetime, organizer)
         else {
             return Err(());
         };
 
         let summary = cal_event.summary.unwrap_or_else(|| "Untitled".to_string());
+        let organizer = EventNodeOrganizer {
+            display_name: organizer.display_name.unwrap(),
+            email: organizer.email.unwrap(),
+        };
 
         Ok(EventNode {
             id: cal_event.id.unwrap(),
@@ -45,6 +57,7 @@ impl TryFrom<CEvent> for EventNode {
             description: cal_event.description,
             start_time: event_start_datetime,
             end_time: event_end_datetime,
+            organizer,
         })
     }
 }
