@@ -2,7 +2,7 @@ use chrono::{Local, NaiveDate};
 use futures::stream::{self, StreamExt, TryStreamExt};
 use google_calendar3::{
     CalendarHub,
-    api::{Event, EventDateTime},
+    api::{Calendar as GCalendar, Event, EventDateTime},
     hyper_rustls::{HttpsConnector, HttpsConnectorBuilder},
     hyper_util::{
         self,
@@ -93,6 +93,21 @@ impl Calendar {
             hub: CalendarHub::new(client, auth),
             calendar_ids,
         })
+    }
+
+    pub async fn get_calendars_info(&self) -> Result<Vec<GCalendar>> {
+        let cal_ids = self.calendar_ids.clone();
+
+        stream::iter(cal_ids.into_iter().map(|cal_id| {
+            let hub_clone = self.hub.clone();
+            async move {
+                let (_, calendar) = hub_clone.calendars().get(&cal_id).doit().await?;
+                Ok(calendar)
+            }
+        }))
+        .buffer_unordered(5)
+        .try_collect()
+        .await
     }
 
     pub async fn get_events(
